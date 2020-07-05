@@ -1,9 +1,10 @@
 import torch
 import numpy as np
+import time
 
 
-def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs, cuda, log_interval, metrics=[],
-        start_epoch=0):
+def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs, cuda, log_interval, model_save_path,
+        metrics=[], start_epoch=0):
     """
     Loaders, model, loss function and metrics should work together for a given task,
     i.e. The model should be able to process data output of loaders,
@@ -13,6 +14,9 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
     Siamese network: Siamese loader, siamese model, contrastive loss
     Online triplet learning: batch loader, embedding model, online triplet loss
     """
+    best_val_loss = None
+    start_time = time.time()
+
     for epoch in range(0, start_epoch):
         scheduler.step()
 
@@ -22,12 +26,16 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
         # Train stage
         train_loss, metrics = train_epoch(train_loader, model, loss_fn, optimizer, cuda, log_interval, metrics)
 
-        message = 'Epoch: {}/{}. Train set: Average loss: {:.4f}'.format(epoch + 1, n_epochs, train_loss)
+        message = 'Epoch: {}/{}. Train set: Average loss: {:.4f} Elapsed time: {}s'.format(epoch + 1, n_epochs, train_loss, int(time.time() - start_time))
         for metric in metrics:
             message += '\t{}: {}'.format(metric.name(), metric.value())
 
         val_loss, metrics = test_epoch(val_loader, model, loss_fn, cuda, metrics)
         val_loss /= len(val_loader)
+
+        if best_val_loss is None or best_val_loss > val_loss:
+            best_val_loss = val_loss
+            torch.save(model.module.state_dict(), model_save_path)
 
         message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f}'.format(epoch + 1, n_epochs,
                                                                                  val_loss)
@@ -45,7 +53,7 @@ def train_epoch(train_loader, model, loss_fn, optimizer, cuda, log_interval, met
     losses = []
     total_loss = 0
 
-    for batch_idx, (data, target) in enumerate(train_loader):
+    for batch_idx, (data, target, _, _, source) in enumerate(train_loader):    # (data, target item id, target category id, idx)
         target = target if len(target) > 0 else None
         if not type(data) in (tuple, list):
             data = (data,)
@@ -53,7 +61,8 @@ def train_epoch(train_loader, model, loss_fn, optimizer, cuda, log_interval, met
             data = tuple(d.cuda() for d in data)
             if target is not None:
                 target = target.cuda()
-
+            if source is not None:
+                source = source.cuda()
 
         optimizer.zero_grad()
         outputs = model(*data)
@@ -65,6 +74,10 @@ def train_epoch(train_loader, model, loss_fn, optimizer, cuda, log_interval, met
         if target is not None:
             target = (target,)
             loss_inputs += target
+
+        if source is not None:
+            source = (source,)
+            loss_inputs += source
 
         loss_outputs = loss_fn(*loss_inputs)
         loss = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs
@@ -96,7 +109,7 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics):
             metric.reset()
         model.eval()
         val_loss = 0
-        for batch_idx, (data, target) in enumerate(val_loader):
+        for batch_idx, (data, target, _, _, source) in enumerate(val_loader):
             target = target if len(target) > 0 else None
             if not type(data) in (tuple, list):
                 data = (data,)
@@ -104,6 +117,8 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics):
                 data = tuple(d.cuda() for d in data)
                 if target is not None:
                     target = target.cuda()
+                if source is not None:
+                    source = source.cuda()
 
             outputs = model(*data)
 
@@ -113,6 +128,9 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics):
             if target is not None:
                 target = (target,)
                 loss_inputs += target
+            if source is not None:
+                source = (source,)
+                loss_inputs += source
 
             loss_outputs = loss_fn(*loss_inputs)
             loss = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs

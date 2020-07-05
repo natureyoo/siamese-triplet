@@ -2,6 +2,10 @@ from itertools import combinations
 
 import numpy as np
 import torch
+import argparse
+import os
+import json
+from multiprocessing import Process, Manager
 
 
 def pdist(vectors):
@@ -96,19 +100,23 @@ class AllTripletSelector(TripletSelector):
     def __init__(self):
         super(AllTripletSelector, self).__init__()
 
-    def get_triplets(self, embeddings, labels):
+    def get_triplets(self, embeddings, labels, sources):
         labels = labels.cpu().data.numpy()
         triplets = []
         for label in set(labels):
-            label_mask = (labels == label)
-            label_indices = np.where(label_mask)[0]
-            if len(label_indices) < 2:
+            anchor = np.where((labels == label) & (sources == 0))[0]
+            if len(anchor) < 0:
                 continue
-            negative_indices = np.where(np.logical_not(label_mask))[0]
-            anchor_positives = list(combinations(label_indices, 2))  # All anchor-positive pairs
+            else:
+                anchor = anchor.item()
+            label_mask = (labels == label)
+            positive_indices = np.where(label_mask & (sources == 1))[0]
+            if len(positive_indices) < 1:
+                continue
+            negative_indices = np.where(np.logical_not(label_mask) & (sources == 1))[0]
 
             # Add all negatives for all positive pairs
-            temp_triplets = [[anchor_positive[0], anchor_positive[1], neg_ind] for anchor_positive in anchor_positives
+            temp_triplets = [[anchor, pos_ind, neg_ind] for pos_ind in positive_indices
                              for neg_ind in negative_indices]
             triplets += temp_triplets
 
@@ -144,7 +152,7 @@ class FunctionNegativeTripletSelector(TripletSelector):
         self.margin = margin
         self.negative_selection_fn = negative_selection_fn
 
-    def get_triplets(self, embeddings, labels):
+    def get_triplets(self, embeddings, labels, sources):
         if self.cpu:
             embeddings = embeddings.cpu()
         distance_matrix = pdist(embeddings)
@@ -154,12 +162,17 @@ class FunctionNegativeTripletSelector(TripletSelector):
         triplets = []
 
         for label in set(labels):
-            label_mask = (labels == label)
-            label_indices = np.where(label_mask)[0]
-            if len(label_indices) < 2:
+            anchor = np.where((labels == label) & (sources == 0).detach().cpu().numpy())[0]
+            if len(anchor) < 1:
                 continue
-            negative_indices = np.where(np.logical_not(label_mask))[0]
-            anchor_positives = list(combinations(label_indices, 2))  # All anchor-positive pairs
+            else:
+                anchor = anchor.item()
+            label_mask = (labels == label)
+            positive_indices = np.where(label_mask & (sources == 1).detach().cpu().numpy())[0]
+            if len(positive_indices) < 1:
+                continue
+            negative_indices = np.where(np.logical_not(label_mask) & (sources == 1).detach().cpu().numpy())[0]
+            anchor_positives = [[anchor, pos_ind] for pos_ind in positive_indices]  # All anchor-positive pairs
             anchor_positives = np.array(anchor_positives)
 
             ap_distances = distance_matrix[anchor_positives[:, 0], anchor_positives[:, 1]]
@@ -172,7 +185,9 @@ class FunctionNegativeTripletSelector(TripletSelector):
                     triplets.append([anchor_positive[0], anchor_positive[1], hard_negative])
 
         if len(triplets) == 0:
-            triplets.append([anchor_positive[0], anchor_positive[1], negative_indices[0]])
+            label, cnt = np.unique(labels, return_counts=True)
+            label = label[cnt >= 2][0]
+            triplets.append([np.where(labels == label)[0][0], np.where(labels == label)[0][1], np.where(labels != label)[0][0]])
 
         triplets = np.array(triplets)
 
@@ -192,3 +207,74 @@ def RandomNegativeTripletSelector(margin, cpu=False): return FunctionNegativeTri
 def SemihardNegativeTripletSelector(margin, cpu=False): return FunctionNegativeTripletSelector(margin=margin,
                                                                                   negative_selection_fn=lambda x: semihard_negative(x, margin),
                                                                                   cpu=cpu)
+
+
+def parse_args_and_merge_const():
+    parser = argparse.ArgumentParser(description='It is the process for Image Retrieval.')
+    parser.add_argument('--conf', default='', type=str)
+    args = parser.parse_args()
+    if args.conf != '':
+        merge_const(args.conf)
+
+
+    # dataset_type
+    # batch_size
+    # epoch_num
+    # evaluate_status
+
+
+def read_data(dataset='DeepFashion'):
+    base_path_list = {'DeepFashion': '/second/DeepFashion', 'DeepFashion2':'/second/DeepFashion2'}
+    base_path = base_path_list[dataset]
+
+    img_list = {}
+    item_dict = {}
+
+    if dataset == 'DeepFashion':
+        file_info = {}
+        for idx, line in enumerate(open(os.path.join(base_path, 'Anno/list_bbox_inshop.txt'), 'r').readlines()):
+            if idx > 1:     # except first 2 lines
+                file_info[line.strip().split()[0]] = np.asarray(line.strip().split()[1:], dtype=np.int)
+
+        # build category idx dictionary
+        category_set = set([cate for gender in ['WOMEN', 'MEN'] for cate in os.listdir(os.path.join(base_path, 'img', gender))])
+        category_dict = {cate: idx for idx, cate in enumerate(category_set)}
+
+        item_dict = {item.strip(): idx - 1 for idx, item in
+                     enumerate(open(os.path.join(base_path, 'Anno/list_item_inshop.txt'), 'r').readlines()) if idx > 0}
+
+        for file_type in ['train', 'validation']:
+            img_list[file_type] = []
+            is_train = file_type == 'train'
+            for idx, line in enumerate(open(os.path.join(base_path, 'Eval/list_eval_partition.txt'), 'r').readlines()):
+                if idx > 1 and is_train == (line.strip().split()[2] == 'train'):        # except first 2 lines
+                    file_name = line.strip().split()[0]
+                    img_list[file_type].append(
+                        [file_name, item_dict[file_name.split('/')[-2]], category_dict[file_name.split('/')[2]],
+                         file_info[file_name][2:]])
+
+            img_list[file_type] = np.asarray(img_list[file_type], dtype=object)
+
+    elif dataset == 'DeepFashion2':
+        for file_type in ['train', 'validation']:
+            img_list[file_type] = []
+            item_dict[file_type] = {}
+            item_idx = 0
+            for file_name in os.listdir(os.path.join(base_path, file_type, 'image')):
+                anno = json.load(open(os.path.join(base_path, file_type, 'annos', file_name.split('.')[0] + '.json'), 'r'))
+                source_type = 0 if anno['source'] == 'user' else 1
+                pair_id = str(anno['pair_id'])
+                for key in anno.keys():
+                    if key not in ['source', 'pair_id'] and int(anno[key]['style']) > 0:
+                        bounding_box = np.asarray(anno[key]['bounding_box'], dtype=int)
+                        cate_id = anno[key]['category_id']
+                        if '_'.join([pair_id, key]) not in item_dict[file_type].keys():
+                            item_dict[file_type]['_'.join([pair_id, key])] = item_idx
+                            item_idx += 1
+                        img_list[file_type].append([os.path.join(file_type, 'image', file_name),
+                                                    item_dict[file_type]['_'.join([pair_id, key])], cate_id,
+                                                    bounding_box, source_type])
+
+            img_list[file_type] = np.asarray(img_list[file_type], dtype=object)
+
+    return img_list, base_path, item_dict

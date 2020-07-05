@@ -2,6 +2,32 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+class ResNet50basedNet(nn.Module):
+    def __init__(self, backbone_model):
+        super(ResNet50basedNet, self).__init__()
+        self.backbone = nn.Sequential(*list(backbone_model.children())[:-2])    # conv layer of ResNet50
+        self.max_pool = nn.AdaptiveMaxPool2d((1,1))
+        self.fc = nn.Linear(2048, 256)
+
+    def forward(self, x):
+        x = self.backbone(x)
+        x = self.max_pool(x)
+        x = x.view(x.size()[0], -1)
+        x = self.fc(x)
+        return x
+
+
+class ResNet50basedMultiNet(nn.Module):
+    def __init__(self):
+        super(ResNet50basedMultiNet, self).__init__()
+
+    def forward(self, x):
+        x = self.fc(x)
+        return x
+
+
+
+
 class EmbeddingNet(nn.Module):
     def __init__(self):
         super(EmbeddingNet, self).__init__()
