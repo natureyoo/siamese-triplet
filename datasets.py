@@ -158,14 +158,17 @@ class BalancedBatchSampler(BatchSampler):
         self.labels = labels
         self.source = source
         self.labels_set = list(set(self.labels))
-        self.label_to_indices = {label: {0: np.where((self.labels == label) & (self.source == 0))[0],
-                                         1: np.where((self.labels == label) & (self.source == 1))[0]}
-                                 for label in self.labels_set}
+        self.label_to_indices = {label: np.where(self.labels == label)[0] for label in self.labels_set}
+        # self.label_to_indices = {label: {0: np.where((self.labels == label) & (self.source == 0))[0],
+        #                                  1: np.where((self.labels == label) & (self.source == 1))[0]}
+        #                          for label in self.labels_set}
         for l_idx in self.labels_set:
-            np.random.shuffle(self.label_to_indices[l_idx][0])
-            np.random.shuffle(self.label_to_indices[l_idx][1])
+            np.random.shuffle(self.label_to_indices[l_idx])
+            # np.random.shuffle(self.label_to_indices[l_idx][0])
+            # np.random.shuffle(self.label_to_indices[l_idx][1])
 
-        self.used_label_indices_count = {label: {0: 0, 1: 0} for label in self.labels_set}
+        # self.used_label_indices_count = {label: {0: 0, 1: 0} for label in self.labels_set}
+        self.used_label_indices_count = {label: 0 for label in self.labels_set}
         self.count = 0
         self.n_classes = n_classes
         self.n_samples = n_samples
@@ -178,21 +181,28 @@ class BalancedBatchSampler(BatchSampler):
             classes = np.random.choice(self.labels_set, self.n_classes, replace=False)
             indices = []
             for class_ in classes:
-                if len(self.label_to_indices[class_][0]) > 0:
-                    indices.append(self.label_to_indices[class_][0][self.used_label_indices_count[class_][0]])
-                    self.used_label_indices_count[class_][0] += 1
-
-                indices.extend(self.label_to_indices[class_][1][
-                               self.used_label_indices_count[class_][1]:self.used_label_indices_count[
-                                                                         class_][1] + self.n_samples - 1])
-
-                if self.used_label_indices_count[class_][0] + 1 > len(self.label_to_indices[class_][0]):
-                    np.random.shuffle(self.label_to_indices[class_][0])
-                    self.used_label_indices_count[class_][0] = 0
-                self.used_label_indices_count[class_][1] += self.n_samples - 1
-                if self.used_label_indices_count[class_][1] + self.n_samples - 1 > len(self.label_to_indices[class_][1]):
-                    np.random.shuffle(self.label_to_indices[class_][1])
-                    self.used_label_indices_count[class_][1] = 0
+                indices.extend(self.label_to_indices[class_][
+                               self.used_label_indices_count[class_]:self.used_label_indices_count[
+                                                                         class_] + self.n_samples])
+                self.used_label_indices_count[class_] += self.n_samples
+                if self.used_label_indices_count[class_] + self.n_samples > len(self.label_to_indices[class_]):
+                    np.random.shuffle(self.label_to_indices[class_])
+                    self.used_label_indices_count[class_] = 0
+                # if len(self.label_to_indices[class_][0]) > 0:
+                #     indices.append(self.label_to_indices[class_][0][self.used_label_indices_count[class_][0]])
+                #     self.used_label_indices_count[class_][0] += 1
+                #
+                # indices.extend(self.label_to_indices[class_][1][
+                #                self.used_label_indices_count[class_][1]:self.used_label_indices_count[
+                #                                                          class_][1] + self.n_samples - 1])
+                #
+                # if self.used_label_indices_count[class_][0] + 1 > len(self.label_to_indices[class_][0]):
+                #     np.random.shuffle(self.label_to_indices[class_][0])
+                #     self.used_label_indices_count[class_][0] = 0
+                # self.used_label_indices_count[class_][1] += self.n_samples - 1
+                # if self.used_label_indices_count[class_][1] + self.n_samples - 1 > len(self.label_to_indices[class_][1]):
+                #     np.random.shuffle(self.label_to_indices[class_][1])
+                #     self.used_label_indices_count[class_][1] = 0
             yield indices
             self.count += self.n_classes * self.n_samples
 
@@ -302,8 +312,8 @@ class DeepFashionDataset(torch.utils.data.Dataset):
         image = self.to_tensor(image)
         image = self.normalize(image)
         image = image.float()
-
-        return image, sample[1], sample[2], i, sample[4]
+        return image, sample[1]
+        # return image, sample[1], sample[2], i, sample[4]
 
     def __len__(self):
         return len(self.ds)

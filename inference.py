@@ -6,7 +6,7 @@ from torchvision import transforms
 import torch
 from torch.utils.data import DataLoader
 from datasets import BalancedBatchSampler, DeepFashionDataset
-from networks import ResNet50basedNet
+from networks import ResNetbasedNet
 import torch.nn as nn
 from torch.utils.data import DataLoader
 

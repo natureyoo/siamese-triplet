@@ -1,13 +1,29 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from detectron2.modeling.backbone import build_resnet_backbone
+from detectron2.layers import ShapeSpec
+import fvcore.nn.weight_init as weight_init
 
 
-class ResNet50basedNet(nn.Module):
-    def __init__(self, backbone_model):
-        super(ResNet50basedNet, self).__init__()
-        self.backbone = nn.Sequential(*list(backbone_model.children())[:-2])    # conv layer of ResNet50
-        self.max_pool = nn.AdaptiveMaxPool2d((1,1))
-        self.fc = nn.Linear(2048, 256)
+class ResNetbasedNet(nn.Module):
+    def __init__(self, cfg):
+        super(ResNetbasedNet, self).__init__()
+        model = build_resnet_backbone(cfg, ShapeSpec(channels=len(cfg.MODEL.PIXEL_MEAN)))
+        pretrained_model = torch.load(cfg.MODEL.WEIGHTS)
+        cur_state = model.state_dict()
+        mapped_dict = {}
+        for name, param in pretrained_model.items():
+            if name == 'model':
+                for p in param:
+                    if p.replace('backbone.bottom_up.', '') in cur_state:
+                        mapped_dict[p.replace('backbone.bottom_up.', '')] = param[p]
+        model.load_state_dict(mapped_dict)
+
+        self.backbone = nn.Sequential(*list(model.children()))    # conv layer of ResNet50
+        self.max_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(2048, 128)
+        weight_init.c2_xavier_fill(self.fc)
 
     def forward(self, x):
         x = self.backbone(x)

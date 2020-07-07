@@ -152,7 +152,7 @@ class FunctionNegativeTripletSelector(TripletSelector):
         self.margin = margin
         self.negative_selection_fn = negative_selection_fn
 
-    def get_triplets(self, embeddings, labels, sources):
+    def get_triplets(self, embeddings, labels):
         if self.cpu:
             embeddings = embeddings.cpu()
         distance_matrix = pdist(embeddings)
@@ -162,17 +162,12 @@ class FunctionNegativeTripletSelector(TripletSelector):
         triplets = []
 
         for label in set(labels):
-            anchor = np.where((labels == label) & (sources == 0).detach().cpu().numpy())[0]
-            if len(anchor) < 1:
-                continue
-            else:
-                anchor = anchor.item()
             label_mask = (labels == label)
-            positive_indices = np.where(label_mask & (sources == 1).detach().cpu().numpy())[0]
-            if len(positive_indices) < 1:
+            label_indices = np.where(label_mask)[0]
+            if len(label_indices) < 2:
                 continue
-            negative_indices = np.where(np.logical_not(label_mask) & (sources == 1).detach().cpu().numpy())[0]
-            anchor_positives = [[anchor, pos_ind] for pos_ind in positive_indices]  # All anchor-positive pairs
+            negative_indices = np.where(np.logical_not(label_mask))[0]
+            anchor_positives = list(combinations(label_indices, 2))  # All anchor-positive pairs
             anchor_positives = np.array(anchor_positives)
 
             ap_distances = distance_matrix[anchor_positives[:, 0], anchor_positives[:, 1]]
@@ -185,9 +180,7 @@ class FunctionNegativeTripletSelector(TripletSelector):
                     triplets.append([anchor_positive[0], anchor_positive[1], hard_negative])
 
         if len(triplets) == 0:
-            label, cnt = np.unique(labels, return_counts=True)
-            label = label[cnt >= 2][0]
-            triplets.append([np.where(labels == label)[0][0], np.where(labels == label)[0][1], np.where(labels != label)[0][0]])
+            triplets.append([anchor_positive[0], anchor_positive[1], negative_indices[0]])
 
         triplets = np.array(triplets)
 
@@ -209,28 +202,21 @@ def SemihardNegativeTripletSelector(margin, cpu=False): return FunctionNegativeT
                                                                                   cpu=cpu)
 
 
-def parse_args_and_merge_const():
-    parser = argparse.ArgumentParser(description='It is the process for Image Retrieval.')
-    parser.add_argument('--conf', default='', type=str)
-    args = parser.parse_args()
-    if args.conf != '':
-        merge_const(args.conf)
+# def parse_args_and_merge_const():
+#     parser = argparse.ArgumentParser(description='It is the process for Image Retrieval.')
+#     parser.add_argument('--conf', default='', type=str)
+#     args = parser.parse_args()
+#     if args.conf != '':
+#         merge_const(args.conf)
 
 
-    # dataset_type
-    # batch_size
-    # epoch_num
-    # evaluate_status
-
-
-def read_data(dataset='DeepFashion'):
-    base_path_list = {'DeepFashion': '/second/DeepFashion', 'DeepFashion2':'/second/DeepFashion2'}
-    base_path = base_path_list[dataset]
+def read_data(dataset_name='DeepFashion2', bbox_gt=True, type_list=['train', 'validation']):
+    base_path = os.path.join('/home/ubuntu', dataset_name)
 
     img_list = {}
     item_dict = {}
 
-    if dataset == 'DeepFashion':
+    if dataset_name == 'DeepFashion':
         file_info = {}
         for idx, line in enumerate(open(os.path.join(base_path, 'Anno/list_bbox_inshop.txt'), 'r').readlines()):
             if idx > 1:     # except first 2 lines
@@ -243,7 +229,7 @@ def read_data(dataset='DeepFashion'):
         item_dict = {item.strip(): idx - 1 for idx, item in
                      enumerate(open(os.path.join(base_path, 'Anno/list_item_inshop.txt'), 'r').readlines()) if idx > 0}
 
-        for file_type in ['train', 'validation']:
+        for file_type in type_list:
             img_list[file_type] = []
             is_train = file_type == 'train'
             for idx, line in enumerate(open(os.path.join(base_path, 'Eval/list_eval_partition.txt'), 'r').readlines()):
@@ -255,24 +241,31 @@ def read_data(dataset='DeepFashion'):
 
             img_list[file_type] = np.asarray(img_list[file_type], dtype=object)
 
-    elif dataset == 'DeepFashion2':
-        for file_type in ['train', 'validation']:
+    elif dataset_name == 'DeepFashion2':
+        box_key = 'bounding_box' if bbox_gt else 'proposal_boxes'
+        for file_type in type_list:
+            anno_dir_path = os.path.join(base_path, file_type, 'annos') if bbox_gt \
+                else os.path.join('/home/jayeon/TmpData', file_type, 'annos_f')
             img_list[file_type] = []
             item_dict[file_type] = {}
             item_idx = 0
             for file_name in os.listdir(os.path.join(base_path, file_type, 'image')):
-                anno = json.load(open(os.path.join(base_path, file_type, 'annos', file_name.split('.')[0] + '.json'), 'r'))
+                anno_path = os.path.join(anno_dir_path, file_name.split('.')[0] + '.json')
+                if not os.path.exists(anno_path):
+                    continue
+                anno = json.load(open(anno_path, 'r'))
                 source_type = 0 if anno['source'] == 'user' else 1
                 pair_id = str(anno['pair_id'])
                 for key in anno.keys():
                     if key not in ['source', 'pair_id'] and int(anno[key]['style']) > 0:
-                        bounding_box = np.asarray(anno[key]['bounding_box'], dtype=int)
+                        bounding_box = np.asarray(anno[key][box_key], dtype=int)
                         cate_id = anno[key]['category_id']
-                        if '_'.join([pair_id, key]) not in item_dict[file_type].keys():
-                            item_dict[file_type]['_'.join([pair_id, key])] = item_idx
+                        pair_style = '_'.join([pair_id, str(anno[key]['style'])])
+                        if pair_style not in item_dict[file_type].keys():
+                            item_dict[file_type][pair_style] = item_idx
                             item_idx += 1
                         img_list[file_type].append([os.path.join(file_type, 'image', file_name),
-                                                    item_dict[file_type]['_'.join([pair_id, key])], cate_id,
+                                                    item_dict[file_type][pair_style], cate_id,
                                                     bounding_box, source_type])
 
             img_list[file_type] = np.asarray(img_list[file_type], dtype=object)

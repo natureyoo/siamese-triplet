@@ -7,9 +7,9 @@ import torch.optim as optim
 # from torch.utils.tensorboard import SummaryWriter
 import torchvision
 
-from networks import EmbeddingNet, ResNet50basedNet
+from networks import ResNetbasedNet
 from losses import OnlineTripletLoss
-from utils import AllTripletSelector, HardestNegativeTripletSelector, RandomNegativeTripletSelector, SemihardNegativeTripletSelector # Strategies for selecting triplets within a minibatch
+from utils import RandomNegativeTripletSelector
 from utils import read_data
 from metrics import AverageNonzeroTripletsMetric
 from trainer import fit
@@ -18,7 +18,8 @@ import numpy as np
 import os
 import sys
 import argparse
-import detectron2
+from detectron2.modeling.backbone import build_resnet_backbone
+from detectron2.layers import ShapeSpec
 
 # sys.path.append('/home/jayeon/Documents/code/siamese-triplet')
 
@@ -27,20 +28,16 @@ def main(args):
     if os.path.exists('models') is False:
         os.makedirs('models')
 
-    dataset_type = args.dataset   # '/second/DeepFashion/'
-    img_list, base_path, item_dict = read_data(dataset_type)
-
+    # img_list, base_path, item_dict = read_data(args.dataset, args.bbox)
+    img_list, base_path, item_dict = read_data("DeepFashion2", bbox_gt=False)
     model_save_path = args.model_path   # 'models/siames_triplet_df2.pth'
 
     # writer = SummaryWriter('runs/fashion_mnist_experiment_1')
-
+    backbone = torch.hub.load('pytorch/vision:v0.6.0', 'resnet50', pretrained=False)
+    model = ResNet50basedNet(backbone)
     if os.path.exists(model_save_path):
-        backbone = torch.hub.load('pytorch/vision:v0.6.0', 'resnet50', pretrained=False)
-        model = ResNet50basedNet(backbone)
         model.load_state_dict(torch.load(model_save_path))
     else:
-        # backbone = torch.hub.load('pytorch/vision:v0.6.0', 'resnet50', pretrained=True)
-        backbone = detectron2.
         model = ResNet50basedNet(backbone)
 
     cuda = torch.cuda.is_available()
@@ -50,7 +47,7 @@ def main(args):
             model = nn.DataParallel(model)
         model.to(device)
 
-    kwargs = {'num_workers': 4, 'pin_memory': True} if cuda else {}
+    kwargs = {'num_workers': 8, 'pin_memory': True} if cuda else {}
 
     if not args.phase:
         train_dataset = DeepFashionDataset(img_list['train'], root=base_path)
@@ -83,6 +80,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='image retrieval system')
     parser.add_argument('-d', '--dataset', required=True, help='DeepFashion / DeepFashion2')
+    parser.add_argument('-b', '--bbox', required=True, help='gt / pred')
     parser.add_argument('--phase', required=False, default='train', help='Train or Inference')
     parser.add_argument('-mp', '--model_path', required=True)
     args = parser.parse_args()
