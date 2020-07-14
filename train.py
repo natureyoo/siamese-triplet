@@ -2,21 +2,19 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from datasets import BalancedBatchSampler, DeepFashionDataset
-from torch.optim import lr_scheduler
 import torch.optim as optim
+from torch.optim import lr_scheduler
+
 # from torch.utils.tensorboard import SummaryWriter
-import torchvision
 
 from networks import ResNetbasedNet
 from losses import OnlineTripletLoss
-from utils import RandomNegativeTripletSelector
-from utils import read_data
+from utils import read_data, RandomNegativeTripletSelector
 from metrics import AverageNonzeroTripletsMetric
 from trainer import fit
 from inference import get_topK_acc
 import numpy as np
 import os
-import sys
 import argparse
 from detectron2.modeling.backbone import build_resnet_backbone
 from detectron2.layers import ShapeSpec
@@ -33,12 +31,9 @@ def main(args):
     model_save_path = args.model_path   # 'models/siames_triplet_df2.pth'
 
     # writer = SummaryWriter('runs/fashion_mnist_experiment_1')
-    backbone = torch.hub.load('pytorch/vision:v0.6.0', 'resnet50', pretrained=False)
-    model = ResNet50basedNet(backbone)
+    model = ResNetbasedNet()
     if os.path.exists(model_save_path):
         model.load_state_dict(torch.load(model_save_path))
-    else:
-        model = ResNet50basedNet(backbone)
 
     cuda = torch.cuda.is_available()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

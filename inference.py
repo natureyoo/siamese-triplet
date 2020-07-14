@@ -69,10 +69,9 @@ def get_topK_acc(gallery_dataset, item_dict, model, cuda, save_file=None, k=100)
 
 
 def main():
-    base_path = '/second/DeepFashion/'
-    model_save_path = 'models/siames_triplet.pth'
-    backbone = torch.hub.load('pytorch/vision:v0.6.0', 'resnet50', pretrained=False)
-    model = ResNet50basedNet(backbone)
+    base_path = '/home/ubuntu/DeepFashion2/'
+    model_save_path = '/home/jayeon/Documents/siamese-triplet/model_norm/00069.pth'
+    model = ResNetbasedNet()
     model.load_state_dict(torch.load(model_save_path))
 
     file_info = {}

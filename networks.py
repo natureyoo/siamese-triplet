@@ -7,23 +7,43 @@ import fvcore.nn.weight_init as weight_init
 
 
 class ResNetbasedNet(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg=None, depth=101, vec_dim=128, max_pool=False):
         super(ResNetbasedNet, self).__init__()
-        model = build_resnet_backbone(cfg, ShapeSpec(channels=len(cfg.MODEL.PIXEL_MEAN)))
-        pretrained_model = torch.load(cfg.MODEL.WEIGHTS)
-        cur_state = model.state_dict()
-        mapped_dict = {}
-        for name, param in pretrained_model.items():
-            if name == 'model':
-                for p in param:
-                    if p.replace('backbone.bottom_up.', '') in cur_state:
-                        mapped_dict[p.replace('backbone.bottom_up.', '')] = param[p]
-        model.load_state_dict(mapped_dict)
+        if cfg is not None:
+            model = build_resnet_backbone(cfg, ShapeSpec(channels=len(cfg.MODEL.PIXEL_MEAN)))
+            pretrained_model = torch.load(cfg.MODEL.WEIGHTS)
+            cur_state = model.state_dict()
+            mapped_dict = {}
+            for name, param in pretrained_model.items():
+                if name == 'model':
+                    for p in param:
+                        if p.replace('backbone.bottom_up.', '') in cur_state:
+                            mapped_dict[p.replace('backbone.bottom_up.', '')] = param[p]
+            model.load_state_dict(mapped_dict)
+            self.backbone = nn.Sequential(*list(model.children()))
+        else:
+            model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet{}'.format(depth), pretrained=True)
+            self.backbone = nn.Sequential(*list(model.children())[:-2])
 
-        self.backbone = nn.Sequential(*list(model.children()))    # conv layer of ResNet50
-        self.max_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(2048, 128)
+        self.max_pool = nn.AdaptiveMaxPool2d((1, 1)) if max_pool else nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(2048, vec_dim)
         weight_init.c2_xavier_fill(self.fc)
+
+    def forward(self, x):
+        x = self.backbone(x)
+        x = self.max_pool(x)
+        x = x.view(x.size()[0], -1)
+        x = self.fc(x)
+        x = F.normalize(x, p=2, dim=1)
+        return x
+
+
+class ResNet50basedNet(nn.Module):
+    def __init__(self, backbone_model):
+        super(ResNet50basedNet, self).__init__()
+        self.backbone = nn.Sequential(*list(backbone_model.children())[:-2])    # conv layer of ResNet50
+        self.max_pool = nn.AdaptiveMaxPool2d((1,1))
+        self.fc = nn.Linear(2048, 256)
 
     def forward(self, x):
         x = self.backbone(x)
@@ -40,8 +60,6 @@ class ResNet50basedMultiNet(nn.Module):
     def forward(self, x):
         x = self.fc(x)
         return x
-
-
 
 
 class EmbeddingNet(nn.Module):

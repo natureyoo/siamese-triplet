@@ -1,13 +1,13 @@
 import numpy as np
 from PIL import Image
+import cv2
 import os
 
 import torch
 from torch.utils.data import Dataset
-from torch.utils.data.sampler import Sampler
 from torch.utils.data.sampler import BatchSampler
-from torchvision import transforms, utils
 import torchvision.transforms.functional as tf
+import albumentations as ab
 
 
 class SiameseMNIST(Dataset):
@@ -288,33 +288,66 @@ class TripletDeepFashion(Dataset):
 
 
 class DeepFashionDataset(torch.utils.data.Dataset):
-    def __init__(self, ds, root):
+    def __init__(self, ds, root, augment=False):
         self.ds = ds
         self.root = root
         self.labels = ds[:, 1]
         self.source = ds[:, 4]
-        self.to_tensor = transforms.ToTensor()
-        self.bbox_resize = BboxResizeTransform(224)
-        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                              std=[0.229, 0.224, 0.225])
-        self.un_normalize = transforms.Normalize(mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
-                                                std=[1 / 0.229, 1 / 0.224, 1 / 0.225])
+        self.augment = ab.Compose([
+            ab.augmentations.transforms.RandomCropNearBBox(max_part_shift=0.2),
+            ab.OneOf([
+                  ab.HorizontalFlip(p=1),
+                  ab.Rotate(border_mode=1, p=1)
+            ], p=0.6),
+            ab.OneOf([
+                  ab.MotionBlur(p=1),
+                  ab.OpticalDistortion(p=1),
+                  ab.GaussNoise(p=1)
+            ], p=1),
+        ]) if augment else None
+        self.transform = ab.Compose([
+            ab.Resize(224, 224),
+            ab.augmentations.transforms.Normalize(),
+        ])
 
     def __getitem__(self, i):
         # crop bounding box, resize to 224 * 224, normalize
         sample = self.ds[i]
-        image = Image.open(os.path.join(self.root, sample[0]))
-        # print('Before processing: {}'.format(np.asarray(image).shape))
-        image = self.bbox_resize(image, sample[3])
-        # print('After processing: {}'.format(np.asarray(image).shape))
-        image = image.copy()
-
-        image = self.to_tensor(image)
-        image = self.normalize(image)
-        image = image.float()
-        return image, sample[1]
-        # return image, sample[1], sample[2], i, sample[4]
+        label = sample[1]
+        image = cv2.imread(os.path.join(self.root, sample[0]))
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        if self.augment:
+            augmented = self.augment(image=image, cropping_bbox=sample[3])
+            image = augmented['image']
+        else:
+            bbox = sample[3]
+            crop = ab.augmentations.transforms.Crop(bbox[0], bbox[1], bbox[2], bbox[3])
+            image = crop(image=image)['image']
+        image = self.transform(image=image)['image']
+        image = torch.from_numpy(image).permute(2, 1, 0)
+        return image, label
 
     def __len__(self):
         return len(self.ds)
 
+
+class GalleryDataset(torch.utils.data.Dataset):
+    def __init__(self, gallery_dir):
+        support_img_fmt = ['jpeg', 'jpg', 'jpe', 'png']
+        self.list_ids = [file for file in os.listdir(gallery_dir) if file.split('.')[1] in support_img_fmt]
+        self.list_imgs = [torch.from_numpy(cv2.imread(os.path.join(gallery_dir, file))).permute(2, 0, 1) for file in self.list_ids]
+        self.list_size = [(img.shape[1], img.shape[2]) for img in self.list_imgs]
+
+    def __len__(self):
+        return len(self.list_ids)
+
+    def __getitem__(self, index):
+        data = {'image': self.list_imgs[index], 'height': self.list_size[index][0], 'width': self.list_size[index][1]}
+        return data
+
+
+def trivial_batch_collator(batch):
+    """
+    A batch collator that does nothing.
+    """
+    return batch

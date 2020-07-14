@@ -18,31 +18,30 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
     best_val_loss = None
     start_time = time.time()
 
-    for epoch in range(0, start_epoch):
-        scheduler.step()
+    # for epoch in range(0, start_epoch):
+    #     scheduler.step()
 
     for epoch in range(start_epoch, n_epochs):
-        scheduler.step()
-
         # Train stage
         train_loss, metrics = train_epoch(train_loader, model, loss_fn, optimizer, cuda, log_interval, metrics)
 
         message = 'Epoch: {}/{}. Train set: Average loss: {:.4f} Elapsed time: {}s'.format(epoch + 1, n_epochs, train_loss, int(time.time() - start_time))
         for metric in metrics:
+            message += '\t{}: {:.4f}'.format(metric.name(), metric.value())
+
+
+        scheduler.step()
+        val_loss, metrics = test_epoch(val_loader, model, loss_fn, cuda, metrics)
+        val_loss /= len(val_loader)
+
+        if best_val_loss is None or best_val_loss > val_loss:
+            best_val_loss = val_loss
+            torch.save(model.module.state_dict(), os.path.join(model_save_dir, '{}.pth'.format(str(epoch).zfill(5))))
+
+        message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f}'.format(epoch + 1, n_epochs,
+                                                                                 val_loss)
+        for metric in metrics:
             message += '\t{}: {}'.format(metric.name(), metric.value())
-
-        torch.save(model.module.state_dict(), os.path.join(model_save_dir, '{}.pth'.format(str(epoch).zfill(5))))
-        # val_loss, metrics = test_epoch(val_loader, model, loss_fn, cuda, metrics)
-        # val_loss /= len(val_loader)
-        #
-        # if best_val_loss is None or best_val_loss > val_loss:
-        #     best_val_loss = val_loss
-        #     torch.save(model.module.state_dict(), model_save_path)
-
-        # message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f}'.format(epoch + 1, n_epochs,
-        #                                                                          val_loss)
-        # for metric in metrics:
-        #     message += '\t{}: {}'.format(metric.name(), metric.value())
 
         print(message)
 
@@ -90,7 +89,7 @@ def train_epoch(train_loader, model, loss_fn, optimizer, cuda, log_interval, met
                 batch_idx * len(data[0]), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), np.mean(losses))
             for metric in metrics:
-                message += '\t{}: {}'.format(metric.name(), metric.value())
+                message += '\t{}: {:.4f}'.format(metric.name(), metric.value())
 
             print(message)
             losses = []
@@ -105,7 +104,7 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics):
             metric.reset()
         model.eval()
         val_loss = 0
-        for batch_idx, (data, target, _, _, source) in enumerate(val_loader):
+        for batch_idx, (data, target) in enumerate(val_loader):
             target = target if len(target) > 0 else None
             if not type(data) in (tuple, list):
                 data = (data,)
@@ -113,8 +112,6 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics):
                 data = tuple(d.cuda() for d in data)
                 if target is not None:
                     target = target.cuda()
-                if source is not None:
-                    source = source.cuda()
 
             outputs = model(*data)
 
@@ -124,9 +121,6 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics):
             if target is not None:
                 target = (target,)
                 loss_inputs += target
-            if source is not None:
-                source = (source,)
-                loss_inputs += source
 
             loss_outputs = loss_fn(*loss_inputs)
             loss = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs
