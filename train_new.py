@@ -13,7 +13,7 @@ from losses import OnlineTripletLoss
 from utils import read_data, RandomNegativeTripletSelector, HardestNegativeTripletSelector
 from metrics import AverageNonzeroTripletsMetric
 from trainer import fit
-from inference import get_topK_acc, get_embedding_mtx
+# from inference import get_topK_acc, get_embedding_mtx
 
 # from detectron2.config import get_cfg
 
@@ -71,18 +71,19 @@ def main(args):
             test_dataset = DeepFashionDataset(img_list['validation'], root=base_path)
             test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=4)
             embedding_mtx = np.zeros((len(test_dataset), 128))
+            labels = np.zeros(len(test_dataset))
             top_k = 10000
             idx_ = 0
             start_time = time.time()
             for idx, (data, target) in enumerate(test_loader):
                 emb_vecs = model(data.cuda())
                 embedding_mtx[idx_: idx_ + len(data)] = emb_vecs.cpu().numpy()
+                labels[idx_:idx_ + len(data)] = np.asarry(target)
                 idx_ += len(data)
                 if idx % 20 == 0:
                     print(
                         'processing {}/{}... elapsed time {}s'.format(idx + 1, len(test_loader), time.time() - start_time))
 
-        labels = np.asarray([data_[1] for data_ in test_dataset], dtype=int)
         result_arr = np.zeros((len(test_dataset), top_k))
         for idx, vec in enumerate(embedding_mtx):
             result_arr[idx] = np.delete(np.argsort(((vec - embedding_mtx) ** 2).mean(axis=1) ** 0.5), idx)[:top_k]
