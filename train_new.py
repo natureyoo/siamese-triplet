@@ -65,20 +65,21 @@ def main(args):
             model_save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0)
 
     else:
-        model.eval()
-        test_dataset = DeepFashionDataset(img_list['validation'], root=base_path)
-        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=4)
-        embedding_mtx = np.zeros((len(test_dataset), 128))
-        top_k = 10000
-        idx_ = 0
-        start_time = time.time()
-        for idx, (data, target) in enumerate(test_loader):
-            emb_vecs = model(data.cuda())
-            embedding_mtx[idx_: idx_ + len(data)] = emb_vecs.cpu().numpy()
-            idx_ += len(data)
-            if idx % 20 == 0:
-                print(
-                    'processing {}/{}... elapsed time {}s'.format(idx + 1, len(test_loader), time.time() - start_time))
+        with torch.no_grad():
+            model.eval()
+            test_dataset = DeepFashionDataset(img_list['validation'], root=base_path)
+            test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=4)
+            embedding_mtx = np.zeros((len(test_dataset), 128))
+            top_k = 10000
+            idx_ = 0
+            start_time = time.time()
+            for idx, (data, target) in enumerate(test_loader):
+                emb_vecs = model(data.cuda())
+                embedding_mtx[idx_: idx_ + len(data)] = emb_vecs.cpu().numpy()
+                idx_ += len(data)
+                if idx % 20 == 0:
+                    print(
+                        'processing {}/{}... elapsed time {}s'.format(idx + 1, len(test_loader), time.time() - start_time))
 
         labels = np.asarray([data_[1] for data_ in test_dataset], dtype=int)
         result_arr = np.zeros((len(test_dataset), top_k))
