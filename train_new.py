@@ -29,7 +29,8 @@ def main(args):
     # cfg.MODEL.BACKBONE.FREEZE_AT = 1
     model_save_dir = args.model_path
 
-    img_list, base_path, item_dict = read_data("DeepFashion2", bbox_gt=True)
+    data_type = ['validation'] if args.phase == 'test' else ['train', 'validation']
+    img_list, base_path, item_dict = read_data("DeepFashion2", bbox_gt=True, type_list=data_type)
 
     model = ResNetbasedNet()
     # model.load_state_dict(torch.load('/home/jayeon/Documents/siamese-triplet/model_norm/00069.pth'))
