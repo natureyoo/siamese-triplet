@@ -1,5 +1,5 @@
 import numpy as np
-import argparse, time
+import argparse, time, os
 
 import torch
 import torch.nn as nn
@@ -15,26 +15,27 @@ from metrics import AverageNonzeroTripletsMetric
 from trainer import fit
 # from inference import get_topK_acc, get_embedding_mtx
 
-# from detectron2.config import get_cfg
+from detectron2.config import get_cfg
 
 
 # sys.path.append('/home/jayeon/Documents/code/siamese-triplet')
 
 
 def main(args):
-    # config_path = "/home/jayeon/Documents/detectron2/configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"
-    # cfg = get_cfg()
-    # cfg.merge_from_file(config_path)
-    # cfg.MODEL.WEIGHTS = "/home/jayeon/Documents/detectron2/tools/output_integrated/model_final.pth"
-    # cfg.MODEL.BACKBONE.FREEZE_AT = 1
+    config_path = "/home/jayeon/Documents/detectron2/configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"
+    cfg = get_cfg()
+    cfg.merge_from_file(config_path)
+    cfg.MODEL.WEIGHTS = "/home/jayeon/Documents/detectron2/tools/output_integrated/model_final.pth"
+    cfg.MODEL.BACKBONE.FREEZE_AT = 1
     model_save_dir = args.model_path
 
     data_type = ['validation'] if args.phase == 'test' else ['train', 'validation']
     img_list, base_path, item_dict = read_data("DeepFashion2", bbox_gt=True, type_list=data_type)
 
-    model = ResNetbasedNet()
+    # model = ResNetbasedNet()
+    # model.load_state_dict(torch.load(args.model_path))
     # model.load_state_dict(torch.load('/home/jayeon/Documents/siamese-triplet/model_norm/00069.pth'))
-    # model = ResNetbasedNet(cfg)
+    model = ResNetbasedNet(cfg)
 
     is_cud = torch.cuda.is_available()
     device = torch.device("cuda" if is_cud else "cpu")
@@ -56,9 +57,9 @@ def main(args):
         margin = 0.4
         loss_fn = OnlineTripletLoss(margin, HardestNegativeTripletSelector(margin))
         grad_norm = 1.
-        optimizer = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-4)
+        optimizer = optim.Adam(model.parameters(), lr=5e-5)
         # nn.utils.clip_grad_norm_(model.parameters(), grad_norm)
-        scheduler = lr_scheduler.StepLR(optimizer, 5, gamma=0.5, last_epoch=-1)
+        scheduler = lr_scheduler.StepLR(optimizer, 4, gamma=0.9, last_epoch=-1)
         n_epochs = 200
         log_interval = 200
 
@@ -72,24 +73,30 @@ def main(args):
             test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=4)
             embedding_mtx = np.zeros((len(test_dataset), 128))
             labels = np.zeros(len(test_dataset))
-            top_k = 10000
+            top_k = 500
             idx_ = 0
             start_time = time.time()
-            for idx, (data, target) in enumerate(test_loader):
+            for idx, (data, target, _) in enumerate(test_loader):
                 emb_vecs = model(data.cuda())
                 embedding_mtx[idx_: idx_ + len(data)] = emb_vecs.cpu().numpy()
-                labels[idx_:idx_ + len(data)] = np.asarry(target)
+                labels[idx_:idx_ + len(data)] = np.asarray(target)
                 idx_ += len(data)
                 if idx % 20 == 0:
                     print(
                         'processing {}/{}... elapsed time {}s'.format(idx + 1, len(test_loader), time.time() - start_time))
+        np.save(args.result_path, embedding_mtx)
+        with open(os.path.join('/'.join(args.result_path.split('/')[:-1]), 'file_info.txt'), 'w') as f:
+            for i in range(len(test_dataset)):
+                f.write('{},{},{}\n'.format(test_dataset[i][0], test_dataset[i][1], test_dataset[i][2]))
+        print('save files!')
 
         result_arr = np.zeros((len(test_dataset), top_k))
         for idx, vec in enumerate(embedding_mtx):
-            result_arr[idx] = np.delete(np.argsort(((vec - embedding_mtx) ** 2).mean(axis=1) ** 0.5), idx)[:top_k]
-            result_arr[idx] = labels[result_arr[idx]] == labels[idx]
-
-        np.save(args.result_path, result_arr)
+            sorted_idx = np.argsort(((vec - embedding_mtx) ** 2).mean(axis=1) ** 0.5)
+            result_arr[idx] = sorted_idx[sorted_idx != idx][:top_k]
+            result_arr[idx] = labels[result_arr[idx].astype(np.int)] == labels[idx]
+            if idx % 1000 == 0:
+                print(idx)
 
         for k in [1, 5, 10, 20, 100, 200, 500]:
             topk_accuracy = np.sum(np.sum(result_arr[:, :k], axis=1) > 0) / result_arr.shape[0]

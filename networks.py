@@ -22,7 +22,7 @@ class ResNetbasedNet(nn.Module):
             model.load_state_dict(mapped_dict)
             self.backbone = nn.Sequential(*list(model.children()))
         else:
-            model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet{}'.format(depth), pretrained=True)
+            model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet{}'.format(depth), pretrained=False)
             self.backbone = nn.Sequential(*list(model.children())[:-2])
 
         self.max_pool = nn.AdaptiveMaxPool2d((1, 1)) if max_pool else nn.AdaptiveAvgPool2d((1, 1))
