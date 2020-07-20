@@ -12,39 +12,26 @@ from networks import ResNetbasedNet
 from losses import OnlineTripletLoss
 from utils import read_data, pdist, RandomNegativeTripletSelector, HardestNegativeTripletSelector
 from metrics import AverageNonzeroTripletsMetric
-from trainer_trip_clf import fit
-# from inference import get_topK_acc, get_embedding_mtx
-
-from detectron2.config import get_cfg
-
-
-# sys.path.append('/home/jayeon/Documents/code/siamese-triplet')
+from trainer_clf import fit
 
 
 def main(args):
-    # config_path = "/home/jayeon/Documents/detectron2/configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"
-    # cfg = get_cfg()
-    # cfg.merge_from_file(config_path)
-    # cfg.MODEL.WEIGHTS = "/home/jayeon/Documents/detectron2/tools/output_integrated/model_final.pth"
-    # cfg.MODEL.BACKBONE.FREEZE_AT = 1
-    model_path = args.model_path
-    save_dir = args.save_dir
+    model_save_dir = args.save_dir
     vec_dim = 512
 
     data_type = ['validation'] if args.phase == 'test' else ['train', 'validation']
     img_list, base_path, item_dict = read_data("DeepFashion2", bbox_gt=True, type_list=data_type)
-    # clf_cate_num = len(set(img_list['train'][:, 2]))
+    clf_inst_num = len(set(img_list['train'][:, 1]))
+    clf_cate_num = len(set(img_list['train'][:, 2]))
 
-    # model = ResNetbasedNet(vec_dim=vec_dim, max_pool=True, load_path=model_path, clf2_num=clf_cate_num)
-    model = ResNetbasedNet(vec_dim=vec_dim, max_pool=True, load_path=model_path)
-    # model.load_state_dict(torch.load(args.model_path))
-    # model = ResNetbasedNet(vec_dim=vec_dim, load_path=model_path, max_pool=True)
-    # model.load_state_dict(torch.load(args.model_path))
+    model = ResNetbasedNet(vec_dim=vec_dim, max_pool=True, clf1_num=clf_inst_num, clf2_num=clf_cate_num)
+    # model.load_state_dict(torch.load('/home/jayeon/Documents/siamese-triplet/model_clf/00006.pth'))
+    model.load_state_dict(torch.load(args.model_path))
     # model.fc = nn.Linear(2048, vec_dim)
     # model.load_state_dict(torch.load('./model_adap_hardes_continue_norm69/00005.pth'))
     # model.load_state_dict(torch.load(args.model_path))
 
-    domain_adap = args.domain_adap
+    # domain_adap = args.domain_adap
     is_cud = torch.cuda.is_available()
     device = torch.device("cuda" if is_cud else "cpu")
     if is_cud:
@@ -54,25 +41,23 @@ def main(args):
     kwargs = {'num_workers': 8, 'pin_memory': True} if is_cud else {}
 
     if args.phase == 'train':
-        train_dataset = DeepFashionDataset(img_list['train'], root=base_path, augment=True)
-        train_batch_sampler = BalancedBatchSampler(train_dataset.labels, train_dataset.source, n_classes=128, n_samples=2)
-        online_train_loader = torch.utils.data.DataLoader(train_dataset, batch_sampler=train_batch_sampler, **kwargs)
+        train_dataset = DeepFashionDataset(img_list['train'], root=base_path, augment=True, clf=True)
+        online_train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=256, shuffle=True, **kwargs)
 
-        test_dataset = DeepFashionDataset(img_list['validation'], root=base_path)
-        test_batch_sampler = BalancedBatchSampler(test_dataset.labels, test_dataset.source, n_classes=128, n_samples=2)
-        online_test_loader = torch.utils.data.DataLoader(test_dataset, batch_sampler=test_batch_sampler, **kwargs)
+        test_dataset = DeepFashionDataset(img_list['validation'], root=base_path, clf=True)
+        online_test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=256, shuffle=False, **kwargs)
 
-        margin = 0.4
-        loss_fn = OnlineTripletLoss(margin, HardestNegativeTripletSelector(margin), domain_adap)
-        criterion = nn.CrossEntropyLoss()
+        criterion1 = nn.CrossEntropyLoss()
+        criterion2 = nn.CrossEntropyLoss()
         grad_norm = 1.
-        optimizer = optim.SGD(model.parameters(), lr=1e-3, momentum=0.9)
+        optimizer = optim.SGD(model.parameters(), lr=5e-3, momentum=0.9)
         nn.utils.clip_grad_norm_(model.parameters(), grad_norm)
-        scheduler = lr_scheduler.StepLR(optimizer, 2, gamma=0.9, last_epoch=-1)
-        n_epochs = 200
+        scheduler = lr_scheduler.StepLR(optimizer, 4, gamma=0.9, last_epoch=-1)
+        n_epochs = 500
         log_interval = 200
 
-        fit(online_train_loader, online_test_loader, model, loss_fn, criterion, optimizer, scheduler, n_epochs, is_cud, log_interval, save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=62)
+        fit(online_train_loader, online_test_loader, model, criterion1, criterion2, optimizer, scheduler, n_epochs,
+            is_cud, log_interval, model_save_dir, start_epoch=87)
 
     else:
         with torch.no_grad():
@@ -84,7 +69,7 @@ def main(args):
             top_k = 500
             idx_ = 0
             start_time = time.time()
-            for idx, (data, target, _, _) in enumerate(test_loader):
+            for idx, (data, target, _) in enumerate(test_loader):
                 emb_vecs = model(data.cuda())
                 embedding_mtx[idx_: idx_ + len(data)] = emb_vecs
                 labels[idx_:idx_ + len(data)] = np.asarray(target)
@@ -92,8 +77,8 @@ def main(args):
                 if idx % 20 == 0:
                     print(
                         'processing {}/{}... elapsed time {}s'.format(idx + 1, len(test_loader), time.time() - start_time))
-        np.save(os.path.join(save_dir, 'emb_mtx_69.npy'), embedding_mtx)
-        with open(os.path.join(save_dir, 'file_info.txt'), 'w') as f:
+        np.save(args.result_path, embedding_mtx)
+        with open(os.path.join('/'.join(args.result_path.split('/')[:-1]), 'file_info.txt'), 'w') as f:
             for i in range(len(test_dataset)):
                 f.write('{},{},{}\n'.format(img_list['validation'][i][0], test_dataset[i][1], test_dataset[i][2]))
         print('save files!')
@@ -118,8 +103,8 @@ if __name__ == '__main__':
     # parser.add_argument('-b', '--bbox', required=True, help='gt / pred')
     parser.add_argument('--phase', required=False, default='train', help='Train or Inference')
     parser.add_argument('--domain', dest='domain_adap', required=False, default=False, help='Train or Inference')
-    parser.add_argument('-mp', dest='model_path', required=False, default=None, help='pretrained model path')
-    parser.add_argument('-s', dest='save_dir', required=True, help='Directory to save the models and the results')
+    parser.add_argument('-mp', '--model_path', dest='model_path',  required=True)
+    parser.add_argument('-s', dest='save_dir', required=False, help='Directory to save the results')
     args = parser.parse_args()
 
     main(args)

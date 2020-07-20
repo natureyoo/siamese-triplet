@@ -158,17 +158,17 @@ class BalancedBatchSampler(BatchSampler):
         self.labels = labels
         self.source = source
         self.labels_set = list(set(self.labels))
-        self.label_to_indices = {label: np.where(self.labels == label)[0] for label in self.labels_set}
-        # self.label_to_indices = {label: {0: np.where((self.labels == label) & (self.source == 0))[0],
-        #                                  1: np.where((self.labels == label) & (self.source == 1))[0]}
-        #                          for label in self.labels_set}
-        for l_idx in self.labels_set:
-            np.random.shuffle(self.label_to_indices[l_idx])
-            # np.random.shuffle(self.label_to_indices[l_idx][0])
-            # np.random.shuffle(self.label_to_indices[l_idx][1])
+        # self.label_to_indices = {label: np.where(self.labels == label)[0] for label in self.labels_set}
+        self.label_to_indices = {label: (i, np.where((self.labels == label) & (self.source == 0))[0],
+                                         np.where((self.labels == label) & (self.source == 1))[0])
+                                 for i, label in enumerate(self.labels_set)}
+        for label in self.labels_set:
+            # np.random.shuffle(self.label_to_indices[label])
+            np.random.shuffle(self.label_to_indices[label][1])
+            np.random.shuffle(self.label_to_indices[label][2])
 
-        # self.used_label_indices_count = {label: {0: 0, 1: 0} for label in self.labels_set}
-        self.used_label_indices_count = {label: 0 for label in self.labels_set}
+        self.used_label_indices_count = np.zeros((len(self.labels_set), 2), dtype=int)
+        # self.used_label_indices_count = {label: 0 for label in self.labels_set}
         self.count = 0
         self.n_classes = n_classes
         self.n_samples = n_samples
@@ -181,28 +181,28 @@ class BalancedBatchSampler(BatchSampler):
             classes = np.random.choice(self.labels_set, self.n_classes, replace=False)
             indices = []
             for class_ in classes:
-                indices.extend(self.label_to_indices[class_][
-                               self.used_label_indices_count[class_]:self.used_label_indices_count[
-                                                                         class_] + self.n_samples])
-                self.used_label_indices_count[class_] += self.n_samples
-                if self.used_label_indices_count[class_] + self.n_samples > len(self.label_to_indices[class_]):
-                    np.random.shuffle(self.label_to_indices[class_])
-                    self.used_label_indices_count[class_] = 0
-                # if len(self.label_to_indices[class_][0]) > 0:
-                #     indices.append(self.label_to_indices[class_][0][self.used_label_indices_count[class_][0]])
-                #     self.used_label_indices_count[class_][0] += 1
-                #
-                # indices.extend(self.label_to_indices[class_][1][
-                #                self.used_label_indices_count[class_][1]:self.used_label_indices_count[
-                #                                                          class_][1] + self.n_samples - 1])
-                #
-                # if self.used_label_indices_count[class_][0] + 1 > len(self.label_to_indices[class_][0]):
-                #     np.random.shuffle(self.label_to_indices[class_][0])
-                #     self.used_label_indices_count[class_][0] = 0
-                # self.used_label_indices_count[class_][1] += self.n_samples - 1
-                # if self.used_label_indices_count[class_][1] + self.n_samples - 1 > len(self.label_to_indices[class_][1]):
-                #     np.random.shuffle(self.label_to_indices[class_][1])
-                #     self.used_label_indices_count[class_][1] = 0
+                # indices.extend(self.label_to_indices[class_][
+                #                self.used_label_indices_count[class_]:self.used_label_indices_count[
+                #                                                          class_] + self.n_samples])
+                # self.used_label_indices_count[class_] += self.n_samples
+                # if self.used_label_indices_count[class_] + self.n_samples > len(self.label_to_indices[class_]):
+                #     np.random.shuffle(self.label_to_indices[class_])
+                #     self.used_label_indices_count[class_] = 0
+                cur_indices = self.label_to_indices[class_]
+                if len(cur_indices[1]) > 0 and len(cur_indices[2]) > 0:
+                    indices.append(cur_indices[1][self.used_label_indices_count[cur_indices[0], 0]])
+                    self.used_label_indices_count[cur_indices[0], 0] += 1
+                    cur_count = self.used_label_indices_count[cur_indices[0], 1]
+                    indices.extend(cur_indices[2][cur_count:cur_count + self.n_samples - 1])
+                    self.used_label_indices_count[cur_indices[0], 1] += self.n_samples - 1
+
+                    if self.used_label_indices_count[cur_indices[0], 0] >= len(cur_indices[1]):
+                        np.random.shuffle(self.label_to_indices[class_][1])
+                        self.used_label_indices_count[cur_indices[0], 0] = 0
+
+                    if self.used_label_indices_count[cur_indices[0], 1] >= len(cur_indices[2]):
+                        np.random.shuffle(self.label_to_indices[class_][2])
+                        self.used_label_indices_count[cur_indices[0], 1] = 0
             yield indices
             self.count += self.n_classes * self.n_samples
 
@@ -288,17 +288,18 @@ class TripletDeepFashion(Dataset):
 
 
 class DeepFashionDataset(torch.utils.data.Dataset):
-    def __init__(self, ds, root, augment=False):
+    def __init__(self, ds, root, augment=False, clf=False):
         self.ds = ds
         self.root = root
+        self.clf = clf
         self.labels = ds[:, 1]
         self.source = ds[:, 4]
         self.augment = ab.Compose([
-            ab.augmentations.transforms.RandomCropNearBBox(max_part_shift=0.2),
+            ab.augmentations.transforms.RandomCropNearBBox(max_part_shift=0.3),
             ab.OneOf([
                   ab.HorizontalFlip(p=1),
                   ab.Rotate(border_mode=1, p=1)
-            ], p=0.6),
+            ], p=0.8),
             ab.OneOf([
                   ab.MotionBlur(p=1),
                   ab.OpticalDistortion(p=1),
@@ -314,6 +315,8 @@ class DeepFashionDataset(torch.utils.data.Dataset):
         # crop bounding box, resize to 224 * 224, normalize
         sample = self.ds[i]
         label = sample[1]
+        cate = sample[2]
+        source = sample[4]
         image = cv2.imread(os.path.join(self.root, sample[0]))
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         if self.augment:
@@ -325,7 +328,7 @@ class DeepFashionDataset(torch.utils.data.Dataset):
             image = crop(image=image)['image']
         image = self.transform(image=image)['image']
         image = torch.from_numpy(image).permute(2, 1, 0)
-        return image, label
+        return image, label, cate, source
 
     def __len__(self):
         return len(self.ds)

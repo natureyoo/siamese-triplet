@@ -71,14 +71,15 @@ class OnlineTripletLoss(nn.Module):
     triplets
     """
 
-    def __init__(self, margin, triplet_selector):
+    def __init__(self, margin, triplet_selector, domain_adap):
         super(OnlineTripletLoss, self).__init__()
         self.margin = margin
         self.triplet_selector = triplet_selector
+        self.domain_adap = domain_adap
 
     def forward(self, embeddings, target):
 
-        triplets = self.triplet_selector.get_triplets(embeddings, target)
+        triplets = self.triplet_selector.get_triplets(embeddings, target, )
 
         if embeddings.is_cuda:
             triplets = triplets.cuda()

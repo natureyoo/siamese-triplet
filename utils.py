@@ -146,13 +146,14 @@ class FunctionNegativeTripletSelector(TripletSelector):
     and return a negative index for that pair
     """
 
-    def __init__(self, margin, negative_selection_fn, cpu=True):
+    def __init__(self, margin, negative_selection_fn, cpu=True, domain_adap=False):
         super(FunctionNegativeTripletSelector, self).__init__()
         self.cpu = cpu
+        self.domain_adap = domain_adap
         self.margin = margin
         self.negative_selection_fn = negative_selection_fn
 
-    def get_triplets(self, embeddings, labels):
+    def get_triplets(self, embeddings, labels, source=None):
         if self.cpu:
             embeddings = embeddings.cpu()
         distance_matrix = pdist(embeddings)
@@ -164,10 +165,14 @@ class FunctionNegativeTripletSelector(TripletSelector):
         for label in set(labels):
             label_mask = (labels == label)
             label_indices = np.where(label_mask)[0]
+            anchor_source = source[label_indices][0] if self.domain_adap else None
             if len(label_indices) < 2:
                 continue
-            negative_indices = np.where(np.logical_not(label_mask))[0]
-            anchor_positives = list(combinations(label_indices, 2))  # All anchor-positive pairs
+            negative_indices = np.where(np.logical_not(label_mask) & (source != anchor_source))[0] if self.domain_adap \
+                                else np.where(np.logical_not(label_mask))[0]
+            anchor_positives = [(label_indices[0], i) for i in label_indices[1:]] if self.domain_adap \
+                                else list(combinations(label_indices, 2))
+            # All anchor-positive pairs
             anchor_positives = np.array(anchor_positives)
 
             ap_distances = distance_matrix[anchor_positives[:, 0], anchor_positives[:, 1]]
@@ -187,19 +192,26 @@ class FunctionNegativeTripletSelector(TripletSelector):
         return torch.LongTensor(triplets)
 
 
-def HardestNegativeTripletSelector(margin, cpu=False): return FunctionNegativeTripletSelector(margin=margin,
+def HardestNegativeTripletSelector(margin, cpu=False, domain_adap=False): return FunctionNegativeTripletSelector(margin=margin,
                                                                                  negative_selection_fn=hardest_negative,
-                                                                                 cpu=cpu)
+                                                                                 cpu=cpu,
+                                                                                 domain_adap=domain_adap)
 
 
-def RandomNegativeTripletSelector(margin, cpu=False): return FunctionNegativeTripletSelector(margin=margin,
+def RandomNegativeTripletSelector(margin, cpu=False, domain_adap=False): return FunctionNegativeTripletSelector(margin=margin,
                                                                                 negative_selection_fn=random_hard_negative,
-                                                                                cpu=cpu)
+                                                                                cpu=cpu,
+                                                                                domain_adap=domain_adap)
 
 
 def SemihardNegativeTripletSelector(margin, cpu=False): return FunctionNegativeTripletSelector(margin=margin,
                                                                                   negative_selection_fn=lambda x: semihard_negative(x, margin),
                                                                                   cpu=cpu)
+
+
+def DomainHardestNegativeTripletSelector(margin, cpu=False): return FunctionNegativeTripletSelector(margin=margin,
+                                                                                 negative_selection_fn=hardest_negative,
+                                                                                 cpu=cpu)
 
 
 # def parse_args_and_merge_const():
@@ -259,7 +271,7 @@ def read_data(dataset_name='DeepFashion2', bbox_gt=True, type_list=['train', 'va
                 for key in anno.keys():
                     if key not in ['source', 'pair_id'] and int(anno[key]['style']) > 0:
                         bounding_box = np.asarray(anno[key][box_key], dtype=int)
-                        cate_id = anno[key]['category_id']
+                        cate_id = anno[key]['category_id'] - 1
                         pair_style = '_'.join([pair_id, str(anno[key]['style'])])
                         if pair_style not in item_dict[file_type].keys():
                             item_dict[file_type][pair_style] = item_idx
