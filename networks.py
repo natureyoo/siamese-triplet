@@ -7,8 +7,12 @@ import fvcore.nn.weight_init as weight_init
 
 
 class ResNetbasedNet(nn.Module):
-    def __init__(self, cfg=None, depth=101, vec_dim=128, max_pool=False):
+    def __init__(self, cfg=None, load_path=None, depth=101, vec_dim=128, max_pool=False, clf1_num=None, clf2_num=None):
         super(ResNetbasedNet, self).__init__()
+        self.load = True if load_path is not None else False
+        self.clf1 = True if clf1_num is not None else False
+        self.clf2 = True if clf2_num is not None else False
+
         if cfg is not None:
             model = build_resnet_backbone(cfg, ShapeSpec(channels=len(cfg.MODEL.PIXEL_MEAN)))
             pretrained_model = torch.load(cfg.MODEL.WEIGHTS)
@@ -22,20 +26,55 @@ class ResNetbasedNet(nn.Module):
             model.load_state_dict(mapped_dict)
             self.backbone = nn.Sequential(*list(model.children()))
         else:
-            model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet{}'.format(depth), pretrained=False)
+            model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet{}'.format(depth), pretrained=not self.load)
             self.backbone = nn.Sequential(*list(model.children())[:-2])
 
         self.max_pool = nn.AdaptiveMaxPool2d((1, 1)) if max_pool else nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(2048, vec_dim)
-        weight_init.c2_xavier_fill(self.fc)
+        
+        if self.clf1:
+            self.clf1_layer = nn.Sequential(
+                    nn.Linear(vec_dim, vec_dim),
+                    nn.BatchNorm1d(vec_dim),
+                    nn.ReLU(),
+                    nn.Linear(vec_dim, clf1_num))
+
+        if self.clf2:
+            self.clf2_layer = nn.Sequential(
+                    nn.Linear(vec_dim, vec_dim),
+                    nn.BatchNorm1d(vec_dim),
+                    nn.ReLU(),
+                    nn.Linear(vec_dim, clf2_num))
+
+        if self.load:
+            load_model = torch.load(load_path)
+            mapped_dict = {'backbone':(self.backbone, {}), 'fc':(self.fc, {})}
+            if self.clf1:
+                mapped_dict['clf1_layer'] = (self.clf1_layer, {})
+            if self.clf2:
+                # print(self.clf2_layer.state_dict())
+                mapped_dict['clf2_layer'] = (self.clf2_layer, {})
+            for name, param in load_model.items():
+                if name.split('.')[0] in mapped_dict.keys():
+                    mapped_dict[name.split('.')[0]][1]['.'.join(name.split('.')[1:])] = param
+            for layers in mapped_dict.keys():
+                mapped_dict[layers][0].load_state_dict(mapped_dict[layers][1])
 
     def forward(self, x):
         x = self.backbone(x)
         x = self.max_pool(x)
         x = x.view(x.size()[0], -1)
         x = self.fc(x)
-        x = F.normalize(x, p=2, dim=1)
-        return x
+        if not self.clf1 or not self.clf2:
+            x_siam = F.normalize(x, p=2, dim=1)
+            if self.clf2:
+                x2 = self.clf2_layer(x)
+                return x_siam, x2
+            return x_siam
+        else:
+            x1 = self.clf1_layer(x)
+            x2 = self.clf2_layer(x)
+            return x1, x2
 
 
 class ResNet50basedNet(nn.Module):

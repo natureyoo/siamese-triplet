@@ -19,7 +19,7 @@ def fit(train_loader, val_loader, model, criterion1, criterion2, optimizer, sche
     best_val_loss = None
     start_time = time.time()
 
-    writer = SummaryWriter('runs/clf')
+    writer = SummaryWriter('runs/clf_128')
 
     for epoch in range(start_epoch, n_epochs):
         # Train stage
@@ -87,7 +87,7 @@ def test_epoch(val_loader, model, criterion2, cuda):
     with torch.no_grad():
         model.eval()
         val_loss = 0
-        for batch_idx, (data, _, cate) in enumerate(val_loader):
+        for batch_idx, (data, _, cate, _) in enumerate(val_loader):
             if cuda:
                 data = data.cuda()
                 cate = cate.cuda()

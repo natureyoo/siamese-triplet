@@ -9,8 +9,7 @@ from multiprocessing import Process, Manager
 
 
 def pdist(vectors):
-    distance_matrix = -2 * vectors.mm(torch.t(vectors)) + vectors.pow(2).sum(dim=1).view(1, -1) + vectors.pow(2).sum(
-        dim=1).view(-1, 1)
+    distance_matrix = -2 * vectors.mm(torch.t(vectors)) + vectors.pow(2).sum(dim=1).view(1, -1) + vectors.pow(2).sum(dim=1).view(-1, 1)
     return distance_matrix
 
 

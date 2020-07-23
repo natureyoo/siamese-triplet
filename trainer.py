@@ -21,7 +21,7 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
 
     # for epoch in range(0, start_epoch):
     #     scheduler.step()
-    writer = SummaryWriter('runs/clf10_based')
+    writer = SummaryWriter('runs/clf128_based')
 
     for epoch in range(start_epoch, n_epochs):
         # Train stage
