@@ -222,7 +222,7 @@ def DomainHardestNegativeTripletSelector(margin, cpu=False): return FunctionNega
 
 
 def read_data(dataset_name='DeepFashion2', bbox_gt=True, type_list=['train', 'validation']):
-    base_path = os.path.join('/home/ubuntu', dataset_name)
+    root_path = '/home/jayeon'
 
     img_list = {}
     item_dict = {}
@@ -253,6 +253,7 @@ def read_data(dataset_name='DeepFashion2', bbox_gt=True, type_list=['train', 'va
             img_list[file_type] = np.asarray(img_list[file_type], dtype=object)
 
     elif dataset_name == 'DeepFashion2':
+        base_path = os.path.join(root_path, 'DeepFashion2')
         box_key = 'bounding_box' if bbox_gt else 'proposal_boxes'
         for file_type in type_list:
             anno_dir_path = os.path.join(base_path, file_type, 'annos') if bbox_gt \

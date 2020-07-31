@@ -77,9 +77,9 @@ class OnlineTripletLoss(nn.Module):
         self.triplet_selector = triplet_selector
         self.domain_adap = domain_adap
 
-    def forward(self, embeddings, target):
+    def forward(self, embeddings, target, source):
 
-        triplets = self.triplet_selector.get_triplets(embeddings, target, )
+        triplets = self.triplet_selector.get_triplets(embeddings, target, source)
 
         if embeddings.is_cuda:
             triplets = triplets.cuda()

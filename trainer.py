@@ -59,7 +59,7 @@ def train_epoch(train_loader, model, loss_fn, optimizer, cuda, writer, epoch, lo
     total_loss = 0
     num_iter = epoch * len(train_loader)
 
-    for batch_idx, (data, target, source) in enumerate(train_loader):    # (data, target item id, target category id, idx)
+    for batch_idx, (data, target, _, source) in enumerate(train_loader):    # (data, target item id, target category id, idx)
         target = target if len(target) > 0 else None
         if not type(data) in (tuple, list):
             data = (data,)
@@ -82,7 +82,6 @@ def train_epoch(train_loader, model, loss_fn, optimizer, cuda, writer, epoch, lo
             loss_inputs += target
         if domain_adap:
             loss_inputs += (source, )
-
         loss_outputs = loss_fn(*loss_inputs)
         loss = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs
         losses.append(loss.item())
