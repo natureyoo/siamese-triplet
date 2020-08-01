@@ -9,7 +9,7 @@ import torch.optim as optim
 
 from datasets import BalancedBatchSampler, DeepFashionDataset
 from networks import ResNetbasedNet
-from losses import OnlineTripletLoss
+from losses import OnlineTripletLoss, AllTripletLoss
 from utils import read_data, pdist, RandomNegativeTripletSelector, HardestNegativeTripletSelector
 from metrics import AverageNonzeroTripletsMetric
 from trainer import fit
@@ -56,20 +56,23 @@ def main(args):
 
     if args.phase == 'train':
         train_dataset = DeepFashionDataset(img_list['train'], root=base_path, augment=True)
-        train_batch_sampler = BalancedBatchSampler(train_dataset.labels, train_dataset.source, n_classes=128, n_samples=2)
+        train_batch_sampler = BalancedBatchSampler(train_dataset.labels, train_dataset.source, n_classes=64, n_samples=4)
         online_train_loader = torch.utils.data.DataLoader(train_dataset, batch_sampler=train_batch_sampler, **kwargs)
 
         test_dataset = DeepFashionDataset(img_list['validation'], root=base_path)
-        test_batch_sampler = BalancedBatchSampler(test_dataset.labels, test_dataset.source, n_classes=128, n_samples=2)
+        test_batch_sampler = BalancedBatchSampler(test_dataset.labels, test_dataset.source, n_classes=64, n_samples=4)
         online_test_loader = torch.utils.data.DataLoader(test_dataset, batch_sampler=test_batch_sampler, **kwargs)
 
-        margin = 0.4
-        loss_fn = OnlineTripletLoss(margin, HardestNegativeTripletSelector(margin), domain_adap)
+        margin = 0.2
+        # loss_fn = OnlineTripletLoss(margin, HardestNegativeTripletSelector(margin), domain_adap)
+        loss_fn = AllTripletLoss(margin)
         # criterion = nn.CrossEntropyLoss()
         grad_norm = 1.
-        optimizer = optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
-        nn.utils.clip_grad_norm_(model.parameters(), grad_norm)
-        scheduler = lr_scheduler.StepLR(optimizer, 2, gamma=0.9, last_epoch=-1)
+        # optimizer = optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
+        optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=5e-4)
+        # nn.utils.clip_grad_norm_(model.parameters(), grad_norm)
+        # scheduler = lr_scheduler.StepLR(optimizer, 2, gamma=0.9, last_epoch=-1)
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=4, threshold=0.001, cooldown=2, min_lr=1e-4 / (10 * 2),)
         n_epochs = 200
         log_interval = 200
 

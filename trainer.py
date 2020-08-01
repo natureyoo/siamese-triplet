@@ -21,7 +21,7 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
 
     # for epoch in range(0, start_epoch):
     #     scheduler.step()
-    writer = SummaryWriter('runs/clf128_based')
+    writer = SummaryWriter('runs/{}'.format(model_save_dir))
 
     for epoch in range(start_epoch, n_epochs):
         # Train stage
@@ -32,11 +32,11 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
         for metric in metrics:
             message += '\t{}: {:.4f}'.format(metric.name(), metric.value())
 
-        scheduler.step()
         val_loss, metrics = test_epoch(val_loader, model, loss_fn, cuda, metrics, domain_adap)
         val_loss /= len(val_loader)
         writer.add_scalars('Loss/train+val', {'validation': val_loss}, (epoch + 1) * len(train_loader) - 1)
-
+        scheduler.step(val_loss)
+        
         if best_val_loss is None or best_val_loss > val_loss:
             best_val_loss = val_loss
         torch.save(model.module.state_dict(), os.path.join(model_save_dir, '{}.pth'.format(str(epoch).zfill(5))))

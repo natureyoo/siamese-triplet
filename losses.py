@@ -89,3 +89,59 @@ class OnlineTripletLoss(nn.Module):
         losses = F.relu(ap_distances - an_distances + self.margin)
 
         return losses.mean(), len(triplets)
+
+
+class AllTripletLoss(nn.Module):
+    def __init__(self, margin=0.2):
+        super(AllTripletLoss, self).__init__()
+        self.margin = margin
+
+    def forward(self, inputs_col, targets_col):
+        n = inputs_col.size(0)
+        # Compute similarity matrix
+        sim_mat = torch.matmul(inputs_col, inputs_col.t())
+        # split the positive and negative pairs
+        eyes_ = torch.eye(n, dtype=torch.uint8).cuda()
+        pos_mask = targets_col.expand(
+            targets_col.shape[0], n
+        ).t() == targets_col.expand(n, targets_col.shape[0])
+        neg_mask = ~ pos_mask
+        pos_mask[:, :n] = pos_mask[:, :n].int() - eyes_
+
+        loss = list()
+        neg_count = list()
+        for i in range(n):
+            pos_pair_idx = torch.nonzero(pos_mask[i, :]).view(-1)
+            if pos_pair_idx.shape[0] > 0:
+                pos_pair_ = sim_mat[i, pos_pair_idx]
+                pos_pair_ = torch.sort(pos_pair_)[0]
+
+                neg_pair_idx = torch.nonzero(neg_mask[i, :]).view(-1)
+                neg_pair_ = sim_mat[i, neg_pair_idx]
+                neg_pair_ = torch.sort(neg_pair_)[0]
+
+                select_pos_pair_idx = torch.nonzero(
+                    pos_pair_ < neg_pair_[-1] + self.margin
+                ).view(-1)
+                pos_pair = pos_pair_[select_pos_pair_idx]
+
+                select_neg_pair_idx = torch.nonzero(
+                    neg_pair_ > max(0.6, pos_pair_[-1]) - self.margin
+                ).view(-1)
+                neg_pair = neg_pair_[select_neg_pair_idx]
+
+                pos_loss = torch.sum(1 - pos_pair)
+                if len(neg_pair) >= 1:
+                    neg_loss = torch.sum(neg_pair)
+                    neg_count.append(len(neg_pair))
+                else:
+                    neg_loss = 0
+                loss.append(pos_loss + neg_loss)
+            else:
+                loss.append(0)
+        # if len(neg_count) != 0:
+        #     log_info["average_neg"] = sum(neg_count) / len(neg_count)
+        # log_info["non_zero"] = len(neg_count)
+        loss = sum(loss) / n
+
+        return loss, len(neg_count)
