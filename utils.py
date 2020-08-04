@@ -229,7 +229,7 @@ def read_data(dataset_name='DeepFashion2', bbox_gt=True, type_list=['train', 'va
 
     if dataset_name == 'DeepFashion':
         file_info = {}
-        for idx, line in enumerate(open(os.path.join(base_path, 'Anno/list_bbox_inshop.txt'), 'r').readlines()):
+        for idx, line in enumerate(open(os.path.join(root_path, 'Anno/list_bbox_inshop.txt'), 'r').readlines()):
             if idx > 1:     # except first 2 lines
                 file_info[line.strip().split()[0]] = np.asarray(line.strip().split()[1:], dtype=np.int)
 
@@ -238,12 +238,12 @@ def read_data(dataset_name='DeepFashion2', bbox_gt=True, type_list=['train', 'va
         category_dict = {cate: idx for idx, cate in enumerate(category_set)}
 
         item_dict = {item.strip(): idx - 1 for idx, item in
-                     enumerate(open(os.path.join(base_path, 'Anno/list_item_inshop.txt'), 'r').readlines()) if idx > 0}
+                     enumerate(open(os.path.join(root_path, 'Anno/list_item_inshop.txt'), 'r').readlines()) if idx > 0}
 
         for file_type in type_list:
             img_list[file_type] = []
             is_train = file_type == 'train'
-            for idx, line in enumerate(open(os.path.join(base_path, 'Eval/list_eval_partition.txt'), 'r').readlines()):
+            for idx, line in enumerate(open(os.path.join(root_path, 'Eval/list_eval_partition.txt'), 'r').readlines()):
                 if idx > 1 and is_train == (line.strip().split()[2] == 'train'):        # except first 2 lines
                     file_name = line.strip().split()[0]
                     img_list[file_type].append(
