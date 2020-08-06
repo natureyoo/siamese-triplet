@@ -3,7 +3,7 @@ import numpy as np
 import time
 import os
 from torch.utils.tensorboard import SummaryWriter
-from attck import FastGradientSignUntargeted
+from attack import FastGradientSignUntargeted
 
 
 def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs, cuda, log_interval, model_save_dir,
