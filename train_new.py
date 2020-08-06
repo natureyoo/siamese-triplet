@@ -25,8 +25,8 @@ def main(args):
     data_type = ['validation'] if args.phase == 'test' else ['train', 'validation']
     img_list, base_path, item_dict = read_data("DeepFashion2", bbox_gt=True, type_list=data_type)
 
+    # model = ResNetbasedNet(vec_dim=vec_dim, max_pool=True, load_path=model_path, clf2_num=2, adv_eta=1e-4)
     model = ResNetbasedNet(vec_dim=vec_dim, max_pool=True, load_path=model_path, clf2_num=2)
-    # model = ResNetbasedNet(vec_dim=vec_dim, max_pool=True, load_path=model_path)
 
     domain_adap = args.domain_adap
     adv_train = args.adv_train
@@ -48,19 +48,22 @@ def main(args):
         online_test_loader = torch.utils.data.DataLoader(test_dataset, batch_sampler=test_batch_sampler, **kwargs)
 
         margin = 0.2
-        # loss_fn = OnlineTripletLoss(margin, HardestNegativeTripletSelector(margin), domain_adap)
-        loss_fn = AllTripletLoss(margin)
+        loss_fn = OnlineTripletLoss(margin, HardestNegativeTripletSelector(margin), domain_adap)
+        # loss_fn = AllTripletLoss(margin)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=5e-4)
-        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=4, threshold=0.001, cooldown=2, min_lr=1e-4 / (10 * 2),)
+        # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=4, threshold=0.001, cooldown=2, min_lr=1e-4 / (10 * 2),)
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=4, threshold=1, cooldown=2, min_lr=1e-4 / (10 * 2),)
         n_epochs = 200
         log_interval = 200
 
-        # fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, is_cud,
-        #     log_interval, save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0, domain_adap=domain_adap, adv_train=adv_train)
-        fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, is_cud, log_interval,
-            save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0, criterion=criterion, adv_train=True,
-            adv_epsilon=0.01, adv_alph=0.01, adv_iter=1)
+        fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, is_cud,
+            log_interval, save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=3, criterion=criterion,
+            domain_adap=domain_adap, adv_train=adv_train)
+        # fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, is_cud, log_interval,
+        #     save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0, criterion=criterion,
+        #     adv_train=True, adv_epsilon=0.01, adv_alph=0.007, adv_iter=1)
+
 
     else:
         with torch.no_grad():

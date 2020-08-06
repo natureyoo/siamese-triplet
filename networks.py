@@ -1,17 +1,35 @@
 import torch
 import torch.nn as nn
+from torch.autograd import Function, Variable
 import torch.nn.functional as F
 from detectron2.modeling.backbone import build_resnet_backbone
 from detectron2.layers import ShapeSpec
 import fvcore.nn.weight_init as weight_init
 
 
+class GradReverse(Function):
+    @staticmethod
+    def forward(ctx, x, lambd):
+        ctx.save_for_backward(lambd)
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        lambd = ctx.saved_tensors[0]
+        return grad_output.neg() * lambd, None
+
+
+def grad_reverse(x, lambd):
+    return GradReverse.apply(x, lambd)
+
+
 class ResNetbasedNet(nn.Module):
-    def __init__(self, cfg=None, load_path=None, depth=101, vec_dim=128, max_pool=False, clf1_num=None, clf2_num=None):
+    def __init__(self, cfg=None, load_path=None, depth=101, vec_dim=128, max_pool=False, clf1_num=None, clf2_num=None, adv_eta=None):
         super(ResNetbasedNet, self).__init__()
         self.load = True if load_path is not None else False
         self.clf1 = True if clf1_num is not None else False
         self.clf2 = True if clf2_num is not None else False
+        self.adv_eta = Variable(torch.tensor(adv_eta).type(torch.float), requires_grad=False) if adv_eta is not None else None
 
         if cfg is not None:
             model = build_resnet_backbone(cfg, ShapeSpec(channels=len(cfg.MODEL.PIXEL_MEAN)))
@@ -69,6 +87,8 @@ class ResNetbasedNet(nn.Module):
             x_siam = F.normalize(x, p=2, dim=1)
             if self.clf2:
                 x2 = self.clf2_layer(x)
+                if self.adv_eta is not None:
+                    x2 = grad_reverse(x2, self.adv_eta)
                 return x_siam, x2
             return x_siam
         else:

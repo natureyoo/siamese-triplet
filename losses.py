@@ -77,7 +77,7 @@ class OnlineTripletLoss(nn.Module):
         self.triplet_selector = triplet_selector
         self.domain_adap = domain_adap
 
-    def forward(self, embeddings, target, source):
+    def forward(self, embeddings, target, source=None):
 
         triplets = self.triplet_selector.get_triplets(embeddings, target, source)
 

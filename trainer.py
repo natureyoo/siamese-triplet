@@ -26,12 +26,11 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
 
         # train_loss, metrics = train_epoch(train_loader, model, attack, loss_fn, optimizer, cuda, writer, epoch,
         #                                   log_interval, metrics, adv_train)
-        train_loss, train_loss_sim, train_loss_domain_cls, metrics = train_domain_classifier_epoch(train_loader, model,
-                                    attack, loss_fn, criterion, optimizer, cuda, writer, epoch, log_interval, metrics)
-
         # message = 'Epoch: {}/{}. Train set: Average loss: {:.4f} Elapsed time: {}s'\
         #     .format(epoch + 1, n_epochs, train_loss, int(time.time() - start_time))
 
+        train_loss, train_loss_sim, train_loss_domain_cls, metrics = train_domain_classifier_epoch(train_loader, model,
+                                    attack, loss_fn, criterion, optimizer, cuda, writer, epoch, log_interval, metrics)
         message = 'Epoch: {}/{}. Train set: Average loss: {:.4f} loss-sim: {:.4f} loss-domain-cls: {:.4f} Elapsed time: {}s'\
             .format(epoch + 1, n_epochs, train_loss, train_loss_sim, train_loss_domain_cls, int(time.time() - start_time))
 
@@ -45,24 +44,22 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
         val_loss_sim /= len(val_loader)
         val_loss_domain_cls /= len(val_loader)
         writer.add_scalars('Loss/total', {'validation': val_loss}, (epoch + 1) * len(train_loader) - 1)
+        # message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f}' \
+        #     .format(epoch + 1, n_epochs, val_loss)
         writer.add_scalars('Loss/similarity', {'validation': val_loss_sim}, (epoch + 1) * len(train_loader) - 1)
         writer.add_scalars('Loss/domain_clf', {'validation': val_loss_domain_cls}, (epoch + 1) * len(train_loader) - 1)
-        scheduler.step(val_loss)
+        message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f} loss-sim: {:.4f} loss-domain-cls: {:.4f}'\
+            .format(epoch + 1, n_epochs, val_loss, val_loss_sim, val_loss_domain_cls)
 
         if best_val_loss is None or best_val_loss > val_loss:
             best_val_loss = val_loss
         torch.save(model.module.state_dict(), os.path.join(model_save_dir, '{}.pth'.format(str(epoch).zfill(5))))
 
-        # message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f}' \
-        #     .format(epoch + 1, n_epochs, val_loss)
-
-        message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f} loss-sim: {:.4f} loss-domain-cls: {:.4f}'\
-            .format(epoch + 1, n_epochs, val_loss, val_loss_sim, val_loss_domain_cls)
-
         for metric in metrics:
             message += '\t{}: {}'.format(metric.name(), metric.value())
             writer.add_scalars('Metric/{}'.format(metric.name()), {'validation': metric.value()}, (epoch + 1) * len(train_loader) - 1)
-
+        # scheduler.step(val_loss)
+        scheduler.step(metrics[0].value())
         print(message)
 
 
@@ -146,7 +143,8 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics, domain_adap):
                 if domain_adap:
                     source = source.cuda()
 
-            outputs, _ = model(*data)
+            # outputs, _ = model(*data)
+            outputs = model(*data)
 
             if type(outputs) not in (tuple, list):
                 outputs = (outputs,)
@@ -194,7 +192,6 @@ def train_domain_classifier_epoch(train_loader, model, attack, loss_fn, criterio
             optimizer.zero_grad()
             outputs = model(adv_data)
         else:
-            model.train()
             optimizer.zero_grad()
             outputs = model(data)
 
