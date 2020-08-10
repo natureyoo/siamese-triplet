@@ -51,19 +51,18 @@ def main(args):
         loss_fn = OnlineTripletLoss(margin, HardestNegativeTripletSelector(margin), domain_adap)
         # loss_fn = AllTripletLoss(margin)
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=5e-4)
+        optimizer = optim.Adam(model.parameters(), lr=1e-5, weight_decay=5e-4)
         # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=4, threshold=0.001, cooldown=2, min_lr=1e-4 / (10 * 2),)
-        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=4, threshold=1, cooldown=2, min_lr=1e-4 / (10 * 2),)
-        n_epochs = 200
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=4, threshold=1, cooldown=2, min_lr=1e-5 / (10 * 2),)
+        n_epochs = 300
         log_interval = 200
 
         fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, is_cud,
-            log_interval, save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=3, criterion=criterion,
+            log_interval, save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=200, criterion=criterion,
             domain_adap=domain_adap, adv_train=adv_train)
         # fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, is_cud, log_interval,
         #     save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0, criterion=criterion,
         #     adv_train=True, adv_epsilon=0.01, adv_alph=0.007, adv_iter=1)
-
 
     else:
         with torch.no_grad():
