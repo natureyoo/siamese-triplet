@@ -86,9 +86,9 @@ class ResNetbasedNet(nn.Module):
         if not self.clf1 or not self.clf2:
             x_siam = F.normalize(x, p=2, dim=1)
             if self.clf2:
-                x2 = self.clf2_layer(x)
                 if self.adv_eta is not None:
-                    x2 = grad_reverse(x2, self.adv_eta)
+                    x = grad_reverse(x, self.adv_eta)
+                x2 = self.clf2_layer(x)
                 return x_siam, x2
             return x_siam
         else:
@@ -97,110 +97,27 @@ class ResNetbasedNet(nn.Module):
             return x1, x2
 
 
-class ResNet50basedNet(nn.Module):
-    def __init__(self, backbone_model):
-        super(ResNet50basedNet, self).__init__()
-        self.backbone = nn.Sequential(*list(backbone_model.children())[:-2])    # conv layer of ResNet50
-        self.max_pool = nn.AdaptiveMaxPool2d((1,1))
-        self.fc = nn.Linear(2048, 256)
+class MixtureNet(ResNetbasedNet):
+    def __init__(self, cfg=None, load_path=None, depth=101, vec_dim=128, max_pool=False,
+                 clf1_num=None, clf2_num=None, adv_eta=None, n_comp=3):
+        super(MixtureNet, self).__init__(cfg=cfg, load_path=load_path, depth=depth, vec_dim=vec_dim // 2,
+                                  max_pool=max_pool, clf1_num=clf1_num, clf2_num=clf2_num, adv_eta=adv_eta)
+        self.n_comp = n_comp
+        self.mix_pi = nn.Linear(vec_dim // 2, self.n_comp)
+        self.mix_emb = nn.Linear(vec_dim // 2, self.n_comp * vec_dim)
 
     def forward(self, x):
         x = self.backbone(x)
         x = self.max_pool(x)
         x = x.view(x.size()[0], -1)
         x = self.fc(x)
-        return x
-
-
-class ResNet50basedMultiNet(nn.Module):
-    def __init__(self):
-        super(ResNet50basedMultiNet, self).__init__()
-
-    def forward(self, x):
-        x = self.fc(x)
-        return x
-
-
-class EmbeddingNet(nn.Module):
-    def __init__(self):
-        super(EmbeddingNet, self).__init__()
-        self.convnet = nn.Sequential(nn.Conv2d(1, 32, 5), nn.PReLU(),
-                                     nn.MaxPool2d(2, stride=2),
-                                     nn.Conv2d(32, 64, 5), nn.PReLU(),
-                                     nn.MaxPool2d(2, stride=2))
-
-        self.fc = nn.Sequential(nn.Linear(64 * 4 * 4, 256),
-                                nn.PReLU(),
-                                nn.Linear(256, 256),
-                                nn.PReLU(),
-                                nn.Linear(256, 2)
-                                )
-
-    def forward(self, x):
-        output = self.convnet(x)
-        output = output.view(output.size()[0], -1)
-        output = self.fc(output)
-        return output
-
-    def get_embedding(self, x):
-        return self.forward(x)
-
-
-class EmbeddingNetL2(EmbeddingNet):
-    def __init__(self):
-        super(EmbeddingNetL2, self).__init__()
-
-    def forward(self, x):
-        output = super(EmbeddingNetL2, self).forward(x)
-        output /= output.pow(2).sum(1, keepdim=True).sqrt()
-        return output
-
-    def get_embedding(self, x):
-        return self.forward(x)
-
-
-class ClassificationNet(nn.Module):
-    def __init__(self, embedding_net, n_classes):
-        super(ClassificationNet, self).__init__()
-        self.embedding_net = embedding_net
-        self.n_classes = n_classes
-        self.nonlinear = nn.PReLU()
-        self.fc1 = nn.Linear(2, n_classes)
-
-    def forward(self, x):
-        output = self.embedding_net(x)
-        output = self.nonlinear(output)
-        scores = F.log_softmax(self.fc1(output), dim=-1)
-        return scores
-
-    def get_embedding(self, x):
-        return self.nonlinear(self.embedding_net(x))
-
-
-class SiameseNet(nn.Module):
-    def __init__(self, embedding_net):
-        super(SiameseNet, self).__init__()
-        self.embedding_net = embedding_net
-
-    def forward(self, x1, x2):
-        output1 = self.embedding_net(x1)
-        output2 = self.embedding_net(x2)
-        return output1, output2
-
-    def get_embedding(self, x):
-        return self.embedding_net(x)
-
-
-class TripletNet(nn.Module):
-    def __init__(self, embedding_net):
-        super(TripletNet, self).__init__()
-        self.embedding_net = embedding_net
-
-    def forward(self, x1, x2, x3):
-        output1 = self.embedding_net(x1)
-        output2 = self.embedding_net(x2)
-        output3 = self.embedding_net(x3)
-        return output1, output2, output3
-
-    def get_embedding(self, x):
-        return self.embedding_net(x)
+        x = F.normalize(x, p=2, dim=1)
+        pi = F.softmax(self.mix_pi(x), -1)
+        x = self.mix_emb(x).reshape(x.shape[0], self.n_comp, -1)
+        x = torch.sum(pi.unsqueeze(-1) * x, dim=1)
+        if self.clf2:
+            if self.adv_eta is not None:
+                x = grad_reverse(x, self.adv_eta)
+            x2 = self.clf2_layer(x)
+            return x, x2, pi
+        return x, pi

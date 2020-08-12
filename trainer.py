@@ -4,10 +4,12 @@ import time
 import os
 from torch.utils.tensorboard import SummaryWriter
 from attack import FastGradientSignUntargeted
+from metrics import RetrivalAccMetric
 
 
 def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs, cuda, log_interval, model_save_dir,
-        metrics=[], start_epoch=0, criterion=None, domain_adap=False, adv_train=False, adv_epsilon=None, adv_alph=None, adv_iter=None):
+        metrics=[], start_epoch=0, criterion=None, domain_cls=False, unsup_da=False, adv_train=False, adv_epsilon=None,
+        adv_alph=None, adv_iter=None, eval_train_dataset=None, eval_test_dataset=None):
 
     best_val_loss = None
     start_time = time.time()
@@ -24,32 +26,40 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
         else:
             attack = None
 
-        # train_loss, metrics = train_epoch(train_loader, model, attack, loss_fn, optimizer, cuda, writer, epoch,
-        #                                   log_interval, metrics, adv_train)
-        # message = 'Epoch: {}/{}. Train set: Average loss: {:.4f} Elapsed time: {}s'\
-        #     .format(epoch + 1, n_epochs, train_loss, int(time.time() - start_time))
+        if not domain_cls:
+            train_loss, metrics = train_epoch(train_loader, model, attack, loss_fn, optimizer, cuda, writer, epoch,
+                                              log_interval, metrics, adv_train)
+            message = 'Epoch: {}/{}. Train set: Average loss: {:.4f} Elapsed time: {}s'\
+                .format(epoch + 1, n_epochs, train_loss, int(time.time() - start_time))
 
-        train_loss, train_loss_sim, train_loss_domain_cls, metrics = train_domain_classifier_epoch(train_loader, model,
-                                    attack, loss_fn, criterion, optimizer, cuda, writer, epoch, log_interval, metrics)
-        message = 'Epoch: {}/{}. Train set: Average loss: {:.4f} loss-sim: {:.4f} loss-domain-cls: {:.4f} Elapsed time: {}s'\
-            .format(epoch + 1, n_epochs, train_loss, train_loss_sim, train_loss_domain_cls, int(time.time() - start_time))
+        else:
+            train_loss, train_loss_sim, train_loss_domain_cls, metrics = train_domain_classifier_epoch(train_loader,\
+                    model, attack, loss_fn, criterion, optimizer, cuda, writer, epoch, log_interval, metrics, unsup_da)
+            message = 'Epoch: {}/{}. Train set: Average loss: {:.4f} loss-sim: {:.4f} loss-domain-cls: {:.4f} Elapsed time: {}s'\
+                .format(epoch + 1, n_epochs, train_loss, train_loss_sim, train_loss_domain_cls, int(time.time() - start_time))
 
         for metric in metrics:
             message += '\t{}: {:.4f}'.format(metric.name(), metric.value())
 
-        # val_loss, metrics = test_epoch(val_loader, model, loss_fn, cuda, metrics, domain_adap)
-        val_loss, val_loss_sim, val_loss_domain_cls, metrics = test_domain_classifier_epoch(val_loader, model,
-                                                                        loss_fn, criterion, cuda, metrics)
-        val_loss /= len(val_loader)
-        val_loss_sim /= len(val_loader)
-        val_loss_domain_cls /= len(val_loader)
-        writer.add_scalars('Loss/total', {'validation': val_loss}, (epoch + 1) * len(train_loader) - 1)
-        # message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f}' \
-        #     .format(epoch + 1, n_epochs, val_loss)
-        writer.add_scalars('Loss/similarity', {'validation': val_loss_sim}, (epoch + 1) * len(train_loader) - 1)
-        writer.add_scalars('Loss/domain_clf', {'validation': val_loss_domain_cls}, (epoch + 1) * len(train_loader) - 1)
-        message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f} loss-sim: {:.4f} loss-domain-cls: {:.4f}'\
-            .format(epoch + 1, n_epochs, val_loss, val_loss_sim, val_loss_domain_cls)
+        summ_step = (epoch + 1) * len(train_loader) - 1
+        # Test stage
+        if not domain_cls:
+            val_loss, metrics = test_epoch(val_loader, model, loss_fn, cuda, metrics)
+            val_loss /= len(val_loader)
+            writer.add_scalars('Loss/total', {'validation': val_loss}, summ_step)
+            message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f}'.format(epoch + 1, n_epochs, val_loss)
+
+        else:
+            val_loss, val_loss_sim, val_loss_domain_cls, metrics = test_domain_classifier_epoch(val_loader, model,
+                                                                        loss_fn, criterion, cuda, metrics, unsup_da)
+            val_loss /= len(val_loader)
+            val_loss_sim /= len(val_loader)
+            val_loss_domain_cls /= len(val_loader)
+            writer.add_scalars('Loss/total', {'validation': val_loss}, summ_step)
+            writer.add_scalars('Loss/similarity', {'validation': val_loss_sim}, summ_step)
+            writer.add_scalars('Loss/domain_clf', {'validation': val_loss_domain_cls}, summ_step)
+            message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f} loss-sim: {:.4f} loss-domain-cls: {:.4f}'\
+                .format(epoch + 1, n_epochs, val_loss, val_loss_sim, val_loss_domain_cls)
 
         if best_val_loss is None or best_val_loss > val_loss:
             best_val_loss = val_loss
@@ -57,9 +67,9 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
 
         for metric in metrics:
             message += '\t{}: {}'.format(metric.name(), metric.value())
-            writer.add_scalars('Metric/{}'.format(metric.name()), {'validation': metric.value()}, (epoch + 1) * len(train_loader) - 1)
-        # scheduler.step(val_loss)
-        scheduler.step(metrics[0].value())
+            writer.add_scalars('Metric/{}'.format(metric.name()), {'validation': metric.value()}, summ_step)
+
+        scheduler.step(val_loss)
         print(message)
 
 
@@ -68,11 +78,13 @@ def train_epoch(train_loader, model, attack, loss_fn, optimizer, cuda, writer, e
         metric.reset()
 
     model.train()
-    losses = []
+    losses = {'sim': [], 'mixture_div': []}
     total_loss = 0
+    total_loss_sim = 0
+    total_loss_mix_div = 0
     num_iter = epoch * len(train_loader)
 
-    for batch_idx, (data, target, _, source) in enumerate(train_loader):    # (data, target item id, target category id, idx)
+    for batch_idx, (data, target, _, source) in enumerate(train_loader):  # (data, target item id, target category id, idx)
         target = target if len(target) > 0 else None
         if cuda:
             data = data.cuda()
@@ -91,42 +103,46 @@ def train_epoch(train_loader, model, attack, loss_fn, optimizer, cuda, writer, e
             optimizer.zero_grad()
             outputs = model(data)
 
-        if type(outputs) not in (tuple, list):
-            outputs = (outputs,)
-
-        loss_inputs = outputs
-        if target is not None:
-            target = (target,)
-            loss_inputs += target
-        # loss_inputs += (source, )
+        # loss_inputs = (outputs, target, )
+        loss_inputs = (outputs[0], target, )
         loss_outputs = loss_fn(*loss_inputs)
-        loss = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs
-        losses.append(loss.item())
+        loss_sim = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs
+        losses['sim'].append(loss_sim.item())
+        total_loss_sim += loss_sim.item()
+
+        loss_mix_div = sum(torch.sum(outputs[1] * torch.log(outputs[1]), dim=1)) / outputs[1].shape[0]
+        losses['mixture_div'].append(loss_mix_div.item())
+        total_loss_mix_div += loss_mix_div.item()
+
+        loss = loss_sim + loss_mix_div
         total_loss += loss.item()
         loss.backward()
         optimizer.step()
 
         for metric in metrics:
-            metric(outputs, target, loss_outputs)
-            writer.add_scalars('Metric/{}'.format(metric.name()), {'train': metric.value()}, num_iter + batch_idx + 1)
+            if metric.name != 'Retrieval Accuracy':
+                metric(outputs, target, loss_outputs)
+                writer.add_scalars('Metric/{}'.format(metric.name()), {'train': metric.value()}, num_iter + batch_idx + 1)
+            else:
+                metric(outputs, target, source)
 
         writer.add_scalars('Loss/train+val', {'train': loss.item()}, num_iter + batch_idx + 1)
 
         if batch_idx % log_interval == 0:
-            message = 'Train: [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                batch_idx * len(data[0]), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), np.mean(losses))
+            message = 'Train: [{}/{} ({:.0f}%)]\tLoss-Sim: {:.6f}\tLoss-MixtureDivergence: {:.6f}'.format(
+                batch_idx * len(data), len(train_loader) * len(data),
+                100. * batch_idx / len(train_loader), np.mean(losses['sim']), np.mean(losses['mixture_div']))
             for metric in metrics:
                 message += '\t{}: {:.4f}'.format(metric.name(), metric.value())
 
             print(message)
-            losses = []
+            losses = {'sim': [], 'mixture_div': []}
 
     total_loss /= (batch_idx + 1)
     return total_loss, metrics
 
 
-def test_epoch(val_loader, model, loss_fn, cuda, metrics, domain_adap):
+def test_epoch(val_loader, model, loss_fn, cuda, metrics):
     with torch.no_grad():
         for metric in metrics:
             metric.reset()
@@ -140,33 +156,27 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics, domain_adap):
                 data = tuple(d.cuda() for d in data)
                 if target is not None:
                     target = target.cuda()
-                if domain_adap:
-                    source = source.cuda()
+                source = source.cuda()
 
             # outputs, _ = model(*data)
             outputs = model(*data)
 
-            if type(outputs) not in (tuple, list):
-                outputs = (outputs,)
-            loss_inputs = outputs
-            if target is not None:
-                target = (target,)
-                loss_inputs += target
-            if domain_adap:
-                loss_inputs += (source, )
-
+            loss_inputs = (outputs[0], target, )
             loss_outputs = loss_fn(*loss_inputs)
             loss = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs
             val_loss += loss.item()
 
             for metric in metrics:
-                metric(outputs, target, loss_outputs)
+                if metric.name == 'Retrieval Accuracy':
+                    metric(outputs, target, source)
+                else:
+                    metric(outputs, target, loss_outputs)
 
     return val_loss, metrics
 
 
 def train_domain_classifier_epoch(train_loader, model, attack, loss_fn, criterion, optimizer, cuda, writer, epoch,
-                                  log_interval, metrics):
+                                  log_interval, metrics, unsup_da=False):
     for metric in metrics:
         metric.reset()
 
@@ -195,10 +205,10 @@ def train_domain_classifier_epoch(train_loader, model, attack, loss_fn, criterio
             optimizer.zero_grad()
             outputs = model(data)
 
-        loss_inputs = (outputs[0], )
-        if target is not None:
-            target = (target,)
-            loss_inputs += target
+        if unsup_da:
+            loss_inputs = (outputs[0][source == 1], target[source == 1], )
+        else:
+            loss_inputs = (outputs[0], target, )
 
         loss_outputs = loss_fn(*loss_inputs)
         loss_sim = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs
@@ -238,7 +248,7 @@ def train_domain_classifier_epoch(train_loader, model, attack, loss_fn, criterio
     return total_loss, total_loss_sim, total_loss_domain_cls, metrics
 
 
-def test_domain_classifier_epoch(val_loader, model, loss_fn, criterion, cuda, metrics):
+def test_domain_classifier_epoch(val_loader, model, loss_fn, criterion, cuda, metrics, unsup_da=False):
     with torch.no_grad():
         for metric in metrics:
             metric.reset()
@@ -258,10 +268,10 @@ def test_domain_classifier_epoch(val_loader, model, loss_fn, criterion, cuda, me
 
             outputs = model(*data)
 
-            loss_inputs = (outputs[0], )
-            if target is not None:
-                target = (target,)
-                loss_inputs += target
+            if unsup_da:
+                loss_inputs = (outputs[0][source == 1], target[source == 1],)
+            else:
+                loss_inputs = (outputs[0], target,)
 
             loss_outputs = loss_fn(*loss_inputs)
             loss_sim = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs

@@ -210,6 +210,61 @@ class BalancedBatchSampler(BatchSampler):
         return self.n_dataset // self.batch_size
 
 
+class DABatchSampler(BatchSampler):
+
+    def __init__(self, labels, source, n_classes, n_samples, domain_cls=False):
+        self.labels = labels
+        self.source = source
+        self.labels_set = np.asarray(list(set(self.labels[self.source == 1])))  # treat only shop images' labels
+        self.total_label_indices_count = np.zeros(self.labels_set.shape[0], dtype=int)
+        self.indices_dict = [np.where(self.source == 0)[0], {}]
+        np.random.shuffle(self.indices_dict[0])
+        for i, label in enumerate(self.labels_set):
+            cur_idx = np.where((self.labels == label) & (self.source == 1))[0]
+            self.indices_dict[1][label] = (i, cur_idx)
+            np.random.shuffle(self.indices_dict[1][label][1])
+            self.total_label_indices_count[i] = len(cur_idx)
+
+        self.used_target_domain_count = 0
+        self.used_label_indices_count = np.zeros(len(self.labels_set), dtype=int)
+        self.count = 0
+        self.n_classes = n_classes
+        self.n_samples = n_samples
+        self.n_dataset = len(self.labels[self.source == 1])
+        self.batch_size = self.n_samples * self.n_classes
+
+        self.domain_cls = domain_cls
+
+    def __iter__(self):
+        self.used_label_indices_count = np.zeros(len(self.labels_set), dtype=int)
+        while np.sum(self.used_label_indices_count < self.total_label_indices_count) >= self.n_classes:
+            classes = np.random.choice(self.labels_set[self.used_label_indices_count < self.total_label_indices_count],
+                                       self.n_classes, replace=False)
+            indices = []
+            for class_ in classes:
+                cur_indices = self.indices_dict[1][class_]
+                if len(cur_indices[1]) > 0:
+                    cur_count = self.used_label_indices_count[cur_indices[0]]
+                    indices.extend(cur_indices[1][cur_count:cur_count + self.n_samples])
+                    self.used_label_indices_count[cur_indices[0]] += self.n_samples
+
+                    if self.used_label_indices_count[cur_indices[0]] >= self.total_label_indices_count[cur_indices[0]]:
+                        np.random.shuffle(self.indices_dict[1][class_][1])
+            if self.domain_cls:
+                source_domain_num = len(indices)
+                indices.extend(self.indices_dict[0]
+                               [self.used_target_domain_count:self.used_target_domain_count + source_domain_num])
+                self.used_target_domain_count += source_domain_num
+                if self.used_target_domain_count >= len(self.indices_dict[0]):
+                    np.random.shuffle(self.indices_dict[0])
+                    self.used_target_domain_count = 0
+
+            yield indices
+
+    def __len__(self):
+        return self.n_dataset // self.batch_size
+
+
 class BboxResizeTransform:
     def __init__(self, size):
         self.size = size
@@ -319,11 +374,14 @@ class DeepFashionDataset(torch.utils.data.Dataset):
         source = sample[4]
         image = cv2.imread(os.path.join(self.root, sample[0]))
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
         if self.augment:
             augmented = self.augment(image=image, cropping_bbox=sample[3])
             image = augmented['image']
         else:
             bbox = sample[3]
+            bbox[2] = min(bbox[2], image.shape[1])
+            bbox[3] = min(bbox[3], image.shape[0])
             crop = ab.augmentations.transforms.Crop(bbox[0], bbox[1], bbox[2], bbox[3])
             image = crop(image=image)['image']
         image = self.transform(image=image)['image']
