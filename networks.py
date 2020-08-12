@@ -111,13 +111,13 @@ class MixtureNet(ResNetbasedNet):
         x = self.max_pool(x)
         x = x.view(x.size()[0], -1)
         x = self.fc(x)
-        x = F.normalize(x, p=2, dim=1)
         pi = F.softmax(self.mix_pi(x), -1)
         x = self.mix_emb(x).reshape(x.shape[0], self.n_comp, -1)
         x = torch.sum(pi.unsqueeze(-1) * x, dim=1)
+        x_sim = F.normalize(x, p=2, dim=1)
         if self.clf2:
             if self.adv_eta is not None:
                 x = grad_reverse(x, self.adv_eta)
             x2 = self.clf2_layer(x)
-            return x, x2, pi
-        return x, pi
+            return x_sim, x2, pi
+        return x_sim, pi

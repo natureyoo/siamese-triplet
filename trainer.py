@@ -44,10 +44,15 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
         summ_step = (epoch + 1) * len(train_loader) - 1
         # Test stage
         if not domain_cls:
-            val_loss, metrics = test_epoch(val_loader, model, loss_fn, cuda, metrics)
+            val_loss, val_loss_sim, val_loss_mix_div, metrics = test_epoch(val_loader, model, loss_fn, cuda, metrics)
             val_loss /= len(val_loader)
+            val_loss_sim /= len(val_loader)
+            val_loss_mix_div /= len(val_loader)
             writer.add_scalars('Loss/total', {'validation': val_loss}, summ_step)
-            message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f}'.format(epoch + 1, n_epochs, val_loss)
+            writer.add_scalars('Loss/similarity', {'validation': val_loss_sim}, summ_step)
+            writer.add_scalars('Loss/miture-divergence', {'validation': val_loss_mix_div}, summ_step)
+            message += '\nEpoch: {}/{}. Validation set: Average loss: {:.4f} loss-sim: {:.4f} loss-mixture-div: {:.4f}'\
+                .format(epoch + 1, n_epochs, val_loss, val_loss_sim, val_loss_mix_div)
 
         else:
             val_loss, val_loss_sim, val_loss_domain_cls, metrics = test_domain_classifier_epoch(val_loader, model,
@@ -110,7 +115,7 @@ def train_epoch(train_loader, model, attack, loss_fn, optimizer, cuda, writer, e
         losses['sim'].append(loss_sim.item())
         total_loss_sim += loss_sim.item()
 
-        loss_mix_div = sum(torch.sum(outputs[1] * torch.log(outputs[1]), dim=1)) / outputs[1].shape[0]
+        loss_mix_div = - sum(torch.sum(outputs[1] * torch.log(outputs[1]), dim=1)) / outputs[1].shape[0]
         losses['mixture_div'].append(loss_mix_div.item())
         total_loss_mix_div += loss_mix_div.item()
 
@@ -126,7 +131,9 @@ def train_epoch(train_loader, model, attack, loss_fn, optimizer, cuda, writer, e
             else:
                 metric(outputs, target, source)
 
-        writer.add_scalars('Loss/train+val', {'train': loss.item()}, num_iter + batch_idx + 1)
+        writer.add_scalars('Loss/total', {'train': loss.item()}, num_iter + batch_idx + 1)
+        writer.add_scalars('Loss/similarity', {'train': loss_sim.item()}, num_iter + batch_idx + 1)
+        writer.add_scalars('Loss/miture-divergence', {'train': loss_mix_div.item()}, num_iter + batch_idx + 1)
 
         if batch_idx % log_interval == 0:
             message = 'Train: [{}/{} ({:.0f}%)]\tLoss-Sim: {:.6f}\tLoss-MixtureDivergence: {:.6f}'.format(
@@ -148,6 +155,8 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics):
             metric.reset()
         model.eval()
         val_loss = 0
+        val_loss_sim = 0
+        val_loss_mix_div = 0
         for batch_idx, (data, target, cate, source) in enumerate(val_loader):
             target = target if len(target) > 0 else None
             if not type(data) in (tuple, list):
@@ -163,7 +172,13 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics):
 
             loss_inputs = (outputs[0], target, )
             loss_outputs = loss_fn(*loss_inputs)
-            loss = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs
+            loss_sim = loss_outputs[0] if type(loss_outputs) in (tuple, list) else loss_outputs
+            val_loss_sim += loss_sim.item()
+
+            loss_mix_div = - sum(torch.sum(outputs[1] * torch.log(outputs[1]), dim=1)) / outputs[1].shape[0]
+            val_loss_mix_div += loss_mix_div.item()
+
+            loss = loss_sim + loss_mix_div
             val_loss += loss.item()
 
             for metric in metrics:
@@ -172,7 +187,7 @@ def test_epoch(val_loader, model, loss_fn, cuda, metrics):
                 else:
                     metric(outputs, target, loss_outputs)
 
-    return val_loss, metrics
+    return val_loss, val_loss_sim, val_loss_mix_div, metrics
 
 
 def train_domain_classifier_epoch(train_loader, model, attack, loss_fn, criterion, optimizer, cuda, writer, epoch,
