@@ -25,11 +25,8 @@ def main(args):
     data_type = ['validation'] if args.phase == 'test' else ['train', 'validation']
     img_list, base_path, item_dict = read_data("DeepFashion2", bbox_gt=True, type_list=data_type)
 
-    # model = ResNetbasedNet(vec_dim=vec_dim, max_pool=True, load_path=model_path, clf2_num=2, adv_eta=1e-4)
-    model = ResNetbasedNet(vec_dim=vec_dim, max_pool=True, load_path=model_path, clf2_num=2)
+    model = ResNetbasedNet(vec_dim=vec_dim, max_pool=True, load_path=model_path)
 
-    domain_adap = args.domain_adap
-    adv_train = args.adv_train
     is_cud = torch.cuda.is_available()
     device = torch.device("cuda" if is_cud else "cpu")
     if is_cud:
@@ -48,21 +45,16 @@ def main(args):
         online_test_loader = torch.utils.data.DataLoader(test_dataset, batch_sampler=test_batch_sampler, **kwargs)
 
         margin = 0.2
-        loss_fn = OnlineTripletLoss(margin, HardestNegativeTripletSelector(margin), domain_adap)
-        # loss_fn = AllTripletLoss(margin)
-        criterion = nn.CrossEntropyLoss()
+        # loss_fn = OnlineTripletLoss(margin, HardestNegativeTripletSelector(margin))
+        loss_fn = AllTripletLoss(margin)
         optimizer = optim.Adam(model.parameters(), lr=1e-5, weight_decay=5e-4)
-        # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=4, threshold=0.001, cooldown=2, min_lr=1e-4 / (10 * 2),)
-        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=4, threshold=1, cooldown=2, min_lr=1e-5 / (10 * 2),)
-        n_epochs = 300
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=4, threshold=0.001, cooldown=2, min_lr=1e-5 / (10 * 2),)
+        n_epochs = 100
         log_interval = 200
+        n_train_data_len = len(train_dataset.labels)
 
-        fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, is_cud,
-            log_interval, save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=200, criterion=criterion,
-            domain_adap=domain_adap, adv_train=adv_train)
-        # fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, is_cud, log_interval,
-        #     save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0, criterion=criterion,
-        #     adv_train=True, adv_epsilon=0.01, adv_alph=0.007, adv_iter=1)
+        fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, n_train_data_len,
+            is_cud, log_interval, save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0)
 
     else:
         with torch.no_grad():
@@ -120,10 +112,8 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--dataset', required=True, help='DeepFashion / DeepFashion2')
     # parser.add_argument('-b', '--bbox', required=True, help='gt / pred')
     parser.add_argument('--phase', required=False, default='train', help='Train or Inference')
-    parser.add_argument('--domain', dest='domain_adap', required=False, default=False, help='Train or Inference')
     parser.add_argument('-mp', dest='model_path', required=False, default=None, help='pretrained model path')
     parser.add_argument('-s', dest='save_dir', required=True, help='Directory to save the models and the results')
-    parser.add_argument('--adv_train', required=False, default=False, help='Make Adversarial Sample')
     args = parser.parse_args()
 
     main(args)
