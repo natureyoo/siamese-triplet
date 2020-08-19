@@ -4,6 +4,12 @@ PyTorch implementation of siamese and triplet networks for learning embeddings.
 
 Siamese and triplet networks are useful to learn mappings from image to a compact Euclidean space where distances correspond to a measure of similarity [2]. Embeddings trained in such way can be used as features vectors for classification or few-shot learning tasks.
 
+# Training
+run the "train_new.py" file, it needs save directory location as argument.
+
+python3.6 train_new.py -d DeepFashion2 -s ./tmp
+
+
 # Installation
 
 Requires [pytorch](http://pytorch.org/) 0.4 with torchvision 0.2.1
