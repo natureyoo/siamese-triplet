@@ -49,20 +49,30 @@ class ResNetbasedNet(nn.Module):
 
         self.max_pool = nn.AdaptiveMaxPool2d((1, 1)) if max_pool else nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(2048, vec_dim)
+        nn.init.xavier_uniform(self.fc.weight)
         
         if self.clf1:
+            linear1 = nn.Linear(vec_dim, vec_dim)
+            linear2 = nn.Linear(vec_dim, clf1_num)
+            nn.init.xavier_uniform(linear1.weight)
+            nn.init.xavier_uniform(linear2.weight)
+
             self.clf1_layer = nn.Sequential(
-                    nn.Linear(vec_dim, vec_dim),
+                    linear1,
                     nn.BatchNorm1d(vec_dim),
                     nn.ReLU(),
-                    nn.Linear(vec_dim, clf1_num))
+                    linear2)
 
         if self.clf2:
+            linear1 = nn.Linear(vec_dim, vec_dim)
+            linear2 = nn.Linear(vec_dim, clf2_num)
+            nn.init.xavier_uniform(linear1.weight)
+            nn.init.xavier_uniform(linear2.weight)
             self.clf2_layer = nn.Sequential(
-                    nn.Linear(vec_dim, vec_dim),
+                    linear1,
                     nn.BatchNorm1d(vec_dim),
                     nn.ReLU(),
-                    nn.Linear(vec_dim, clf2_num))
+                    linear2)
 
         if self.load:
             load_model = torch.load(load_path)
@@ -105,6 +115,16 @@ class MixtureNet(ResNetbasedNet):
         self.n_comp = n_comp
         self.mix_pi = nn.Linear(vec_dim // 2, self.n_comp)
         self.mix_emb = nn.Linear(vec_dim // 2, self.n_comp * vec_dim)
+
+        nn.init.xavier_uniform(self.mix_pi.weight)
+        nn.init.xavier_uniform(self.mix_emb.weight)
+
+        if load_path is not None:
+            load_model = torch.load(load_path)
+            mix_pi_map = {p_name.split('.')[1]: load_model[p_name] for p_name in load_model.keys() if p_name.split('.')[0] == 'mix_pi'}
+            self.mix_pi.load_state_dict(mix_pi_map)
+            mix_emb_map = {p_name.split('.')[1]: load_model[p_name] for p_name in load_model.keys() if p_name.split('.')[0] == 'mix_emb'}
+            self.mix_emb.load_state_dict(mix_emb_map)
 
     def forward(self, x):
         x = self.backbone(x)

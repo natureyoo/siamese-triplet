@@ -349,18 +349,19 @@ class DeepFashionDataset(torch.utils.data.Dataset):
         self.clf = clf
         self.labels = ds[:, 1]
         self.source = ds[:, 4]
-        self.augment = ab.Compose([
-            ab.augmentations.transforms.RandomCropNearBBox(max_part_shift=0.3),
-            ab.OneOf([
-                  ab.HorizontalFlip(p=1),
-                  ab.Rotate(border_mode=1, p=1)
-            ], p=0.8),
-            ab.OneOf([
-                  ab.MotionBlur(p=1),
-                  ab.OpticalDistortion(p=1),
-                  ab.GaussNoise(p=1)
-            ], p=1),
-        ]) if augment else None
+        # self.augment = ab.Compose([
+        #     ab.augmentations.transforms.RandomCropNearBBox(max_part_shift=0.3),
+        #     ab.OneOf([
+        #           ab.HorizontalFlip(p=1),
+        #           ab.Rotate(border_mode=1, p=1)
+        #     ], p=0.8),
+        #     ab.OneOf([
+        #           ab.MotionBlur(p=1),
+        #           ab.OpticalDistortion(p=1),
+        #           ab.GaussNoise(p=1)
+        #     ], p=1),
+        # ]) if augment else None
+        self.augment = ab.HorizontalFlip(p=0.5) if augment else None
         self.transform = ab.Compose([
             ab.Resize(224, 224),
             ab.augmentations.transforms.Normalize(),
@@ -376,7 +377,13 @@ class DeepFashionDataset(torch.utils.data.Dataset):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         if self.augment:
-            augmented = self.augment(image=image, cropping_bbox=sample[3])
+            # augmented = self.augment(image=image, cropping_bbox=sample[3])
+            bbox = sample[3]
+            bbox[2] = min(bbox[2], image.shape[1])
+            bbox[3] = min(bbox[3], image.shape[0])
+            crop = ab.augmentations.transforms.Crop(bbox[0], bbox[1], bbox[2], bbox[3])
+            image = crop(image=image)['image']
+            augmented = self.augment(image=image)
             image = augmented['image']
         else:
             bbox = sample[3]
