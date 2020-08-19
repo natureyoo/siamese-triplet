@@ -89,7 +89,7 @@ def train_epoch(train_loader, model, loss_fn, optimizer, cuda, writer, epoch, lo
             print(message)
             losses = []
 
-    total_loss /= (batch_idx + 1)
+    total_loss /= len(train_loader)
 
     return total_loss, metrics
 
