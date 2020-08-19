@@ -82,7 +82,8 @@ def train_epoch(train_loader, model, loss_fn, optimizer, cuda, writer, epoch, lo
 
         if batch_idx % log_interval == 0:
             message = 'Train: [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                cur_iter, n_train_data_len, 100. * cur_iter / n_train_data_len, np.mean(losses))
+                int(batch_idx / len(train_loader) * len(train_loader.dataset)), len(train_loader.dataset),
+                100. * batch_idx / len(train_loader), np.mean(losses))
             for metric in metrics:
                 message += '\t{}: {:.4f}'.format(metric.name(), metric.value())
 
