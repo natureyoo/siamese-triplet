@@ -71,10 +71,11 @@ def main(args):
     is_cud = torch.cuda.is_available()
     device = torch.device("cuda" if is_cud else "cpu")
     if is_cud:
+        print(torch.cuda.device_count())
         if torch.cuda.device_count() > 1:
-            model = nn.DataParallel(model)
+            model = nn.DataParallel(model, device_ids=[0,1])
         model.to(device)
-    kwargs = {'num_workers': 8, 'pin_memory': True} if is_cud else {}
+    kwargs = {'num_workers': 4, 'pin_memory': True} if is_cud else {}
 
     if args.phase == 'train':
         train_dataset = DeepFashionDataset(img_list['train'], root=base_path, augment=args.augment)
@@ -100,7 +101,7 @@ def main(args):
         #     log_interval, save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0,
         #     domain_adap=domain_adap, adv_train=adv_train, eval_train_dataset=train_dataset, eval_test_dataset=test_dataset)
         fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, is_cud, log_interval,
-            save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0, criterion=criterion, use_dt=args.use_dt, clf_task=args.multi_task)
+            save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=1, criterion=criterion, use_dt=args.use_dt, clf_task=args.multi_task)
 
     else:
         model.eval()

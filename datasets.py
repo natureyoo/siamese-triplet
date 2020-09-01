@@ -233,7 +233,7 @@ class DABatchSampler(BatchSampler):
         self.n_dataset = len(self.labels[self.source == 1])
         self.batch_size = self.n_samples * self.n_classes
 
-        self.dt = dt
+        self.use_dt = use_dt
 
     def __iter__(self):
         self.used_label_indices_count = np.zeros(len(self.labels_set), dtype=int)
@@ -250,7 +250,7 @@ class DABatchSampler(BatchSampler):
 
                     if self.used_label_indices_count[cur_indices[0]] >= self.total_label_indices_count[cur_indices[0]]:
                         np.random.shuffle(self.indices_dict[1][class_][1])
-            if self.dt:
+            if self.use_dt:
                 source_domain_num = len(indices)
                 indices.extend(self.indices_dict[0]
                                [self.used_target_domain_count:self.used_target_domain_count + source_domain_num])

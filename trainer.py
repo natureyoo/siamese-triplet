@@ -13,8 +13,8 @@ def fit(train_loader, val_loader, model, loss_fn, optimizer, scheduler, n_epochs
     best_val_loss = None
     start_time = time.time()
 
-    for epoch in range(0, start_epoch):
-        scheduler.step()
+    # for epoch in range(0, start_epoch):
+    #     scheduler.step()
 
     writer = SummaryWriter('runs/{}'.format(model_save_dir))
 
