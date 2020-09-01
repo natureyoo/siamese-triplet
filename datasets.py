@@ -212,7 +212,7 @@ class BalancedBatchSampler(BatchSampler):
 
 class DABatchSampler(BatchSampler):
 
-    def __init__(self, labels, source, n_classes, n_samples, domain_cls=False):
+    def __init__(self, labels, source, n_classes, n_samples, use_dt=False):
         self.labels = labels
         self.source = source
         self.labels_set = np.asarray(list(set(self.labels[self.source == 1])))  # treat only shop images' labels
@@ -233,7 +233,7 @@ class DABatchSampler(BatchSampler):
         self.n_dataset = len(self.labels[self.source == 1])
         self.batch_size = self.n_samples * self.n_classes
 
-        self.domain_cls = domain_cls
+        self.dt = dt
 
     def __iter__(self):
         self.used_label_indices_count = np.zeros(len(self.labels_set), dtype=int)
@@ -250,7 +250,7 @@ class DABatchSampler(BatchSampler):
 
                     if self.used_label_indices_count[cur_indices[0]] >= self.total_label_indices_count[cur_indices[0]]:
                         np.random.shuffle(self.indices_dict[1][class_][1])
-            if self.domain_cls:
+            if self.dt:
                 source_domain_num = len(indices)
                 indices.extend(self.indices_dict[0]
                                [self.used_target_domain_count:self.used_target_domain_count + source_domain_num])
@@ -343,25 +343,26 @@ class TripletDeepFashion(Dataset):
 
 
 class DeepFashionDataset(torch.utils.data.Dataset):
-    def __init__(self, ds, root, augment=False, clf=False):
+    def __init__(self, ds, root, augment=False):
         self.ds = ds
         self.root = root
-        self.clf = clf
         self.labels = ds[:, 1]
         self.source = ds[:, 4]
-        # self.augment = ab.Compose([
-        #     ab.augmentations.transforms.RandomCropNearBBox(max_part_shift=0.3),
-        #     ab.OneOf([
-        #           ab.HorizontalFlip(p=1),
-        #           ab.Rotate(border_mode=1, p=1)
-        #     ], p=0.8),
-        #     ab.OneOf([
-        #           ab.MotionBlur(p=1),
-        #           ab.OpticalDistortion(p=1),
-        #           ab.GaussNoise(p=1)
-        #     ], p=1),
-        # ]) if augment else None
-        self.augment = ab.HorizontalFlip(p=0.5) if augment else None
+        if augment:
+            self.augment = ab.Compose([
+                ab.augmentations.transforms.RandomCropNearBBox(max_part_shift=0.3),
+                ab.OneOf([
+                      ab.HorizontalFlip(p=1),
+                      ab.Rotate(border_mode=1, p=1)
+                ], p=0.8),
+                ab.OneOf([
+                      ab.MotionBlur(p=1),
+                      ab.OpticalDistortion(p=1),
+                      ab.GaussNoise(p=1)
+                ], p=1),
+            ])
+        else:
+            self.augment = None
         self.transform = ab.Compose([
             ab.Resize(224, 224),
             ab.augmentations.transforms.Normalize(),
@@ -376,21 +377,15 @@ class DeepFashionDataset(torch.utils.data.Dataset):
         image = cv2.imread(os.path.join(self.root, sample[0]))
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        if self.augment:
-            # augmented = self.augment(image=image, cropping_bbox=sample[3])
-            bbox = sample[3]
-            bbox[2] = min(bbox[2], image.shape[1])
-            bbox[3] = min(bbox[3], image.shape[0])
+        bbox = sample[3]
+        bbox[2] = min(bbox[2], image.shape[1])
+        bbox[3] = min(bbox[3], image.shape[0])
+
+        if self.augment is None:
             crop = ab.augmentations.transforms.Crop(bbox[0], bbox[1], bbox[2], bbox[3])
             image = crop(image=image)['image']
-            augmented = self.augment(image=image)
-            image = augmented['image']
         else:
-            bbox = sample[3]
-            bbox[2] = min(bbox[2], image.shape[1])
-            bbox[3] = min(bbox[3], image.shape[0])
-            crop = ab.augmentations.transforms.Crop(bbox[0], bbox[1], bbox[2], bbox[3])
-            image = crop(image=image)['image']
+            image = self.augment(image=image, cropping_bbox=bbox)['image']
         image = self.transform(image=image)['image']
         image = torch.from_numpy(image).permute(2, 1, 0)
         return image, label, cate, source
