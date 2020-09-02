@@ -254,18 +254,18 @@ def train_with_classifier_epoch(train_loader, model, attack, loss_fn, criterion,
             writer.add_scalars('Metric/{}'.format(metric.name()), {'train': metric.value()}, num_iter + batch_idx + 1)
 
         writer.add_scalars('Loss/similarity', {'train': loss_sim.item()}, num_iter + batch_idx + 1)
-        writer.add_scalars('Loss/domain_clf', {'train': total_loss_cls.item()}, num_iter + batch_idx + 1)
+        writer.add_scalars('Loss/domain_clf', {'train': loss_cls.item()}, num_iter + batch_idx + 1)
         writer.add_scalars('Loss/total', {'train': loss.item()}, num_iter + batch_idx + 1)
 
         if batch_idx % log_interval == 0:
             message = 'Train: [{}/{} ({:.0f}%)]\tLoss Sim: {:.6f} Domain: {:.6f}'.format(
                 batch_idx * len(data[0]), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), np.mean(losses['sim']), np.mean(losses['domain_cls']))
+                100. * batch_idx / len(train_loader), np.mean(losses['sim']), np.mean(losses['cls']))
             for metric in metrics:
                 message += '\t{}: {:.4f}'.format(metric.name(), metric.value())
 
             print(message)
-            losses = {'sim': [], 'domain_cls': []}
+            losses = {'sim': [], 'cls': []}
 
     total_loss /= (batch_idx + 1)
     total_loss_sim /= (batch_idx + 1)

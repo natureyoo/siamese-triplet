@@ -29,9 +29,9 @@ def eval_retrieval_acc(embedding_mtx, sources, labels):
     dist = pdist(shop_emb_mtx, shop_emb_mtx)
     sort_idx = np.argsort(dist, axis=1)[:, 1:101]
 
-    result_arr = np.zeros((len(user_idx), 100))
-    for i, idx in enumerate(user_idx):
-        result_arr[i] = labels[shop_idx[sort_idx[i].astype(np.int)]] == labels[idx]
+    result_arr = np.zeros((len(shop_idx), 100))
+    for i, idx in enumerate(shop_idx):
+        result_arr[i] = labels[shop_idx[sort_idx[i]]] == labels[idx]
 
     print('Inshop Retrieval Acc')
     for k in [1, 5, 10, 20, 100]:
@@ -45,7 +45,7 @@ def eval_retrieval_acc(embedding_mtx, sources, labels):
 
     result_arr = np.zeros((len(user_idx), 100))
     for i, idx in enumerate(user_idx):
-        result_arr[i] = labels[shop_idx[sort_idx[i].astype(np.int)]] == labels[idx]
+        result_arr[i] = labels[shop_idx[sort_idx[i]]] == labels[idx]
 
     print('User2shop Retrieval Acc')
     for k in [1, 5, 10, 20, 100]:
@@ -73,17 +73,17 @@ def main(args):
     if is_cud:
         print(torch.cuda.device_count())
         if torch.cuda.device_count() > 1:
-            model = nn.DataParallel(model, device_ids=[0,1])
+            model = nn.DataParallel(model, device_ids=[0,1,2,3])
         model.to(device)
-    kwargs = {'num_workers': 4, 'pin_memory': True} if is_cud else {}
+    kwargs = {'num_workers': 8, 'pin_memory': True} if is_cud else {}
 
     if args.phase == 'train':
         train_dataset = DeepFashionDataset(img_list['train'], root=base_path, augment=args.augment)
-        train_batch_sampler = DABatchSampler(train_dataset.labels, train_dataset.source, n_classes=64, n_samples=4, use_dt=args.use_dt)
+        train_batch_sampler = DABatchSampler(train_dataset.labels, train_dataset.source, n_classes=32, n_samples=4, use_dt=args.use_dt)
         online_train_loader = torch.utils.data.DataLoader(train_dataset, batch_sampler=train_batch_sampler, **kwargs)
 
         test_dataset = DeepFashionDataset(img_list['validation'], root=base_path)
-        test_batch_sampler = DABatchSampler(test_dataset.labels, test_dataset.source, n_classes=64, n_samples=4, use_dt=args.use_dt)
+        test_batch_sampler = DABatchSampler(test_dataset.labels, test_dataset.source, n_classes=32, n_samples=4, use_dt=args.use_dt)
         online_test_loader = torch.utils.data.DataLoader(test_dataset, batch_sampler=test_batch_sampler, **kwargs)
 
         margin = 0.2
@@ -92,7 +92,7 @@ def main(args):
         criterion = nn.CrossEntropyLoss() if clf_num is not None else None
         optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=5e-4)
         # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, patience=4, threshold=0.001, cooldown=2, min_lr=1e-4 / (10 * 2),)
-        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.9, patience=2, threshold=0.001, cooldown=2,
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, threshold=0.001, cooldown=2,
                                                    min_lr=1e-7, )
         n_epochs = 100
         log_interval = 200
@@ -101,7 +101,7 @@ def main(args):
         #     log_interval, save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0,
         #     domain_adap=domain_adap, adv_train=adv_train, eval_train_dataset=train_dataset, eval_test_dataset=test_dataset)
         fit(online_train_loader, online_test_loader, model, loss_fn, optimizer, scheduler, n_epochs, is_cud, log_interval,
-            save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=1, criterion=criterion, use_dt=args.use_dt, clf_task=args.multi_task)
+            save_dir, metrics=[AverageNonzeroTripletsMetric()], start_epoch=0, criterion=criterion, use_dt=args.use_dt, clf_task=args.multi_task)
 
     else:
         model.eval()

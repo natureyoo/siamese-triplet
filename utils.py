@@ -8,8 +8,12 @@ import json
 from multiprocessing import Process, Manager
 
 
-def pdist(vectors):
-    distance_matrix = -2 * vectors.mm(torch.t(vectors)) + vectors.pow(2).sum(dim=1).view(1, -1) + vectors.pow(2).sum(dim=1).view(-1, 1)
+def pdist(source_mtx, target_mtx=None):
+    if target_mtx is None:
+        target_mtx = source_mtx
+    distance_matrix = -2 * source_mtx.mm(torch.t(target_mtx))\
+                      + (source_mtx ** 2).sum(axis=1).reshape(-1, 1)\
+                      + (target_mtx ** 2).sum(axis=1).reshape(1, -1)
     return distance_matrix
 
 

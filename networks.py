@@ -66,7 +66,7 @@ class ResNetbasedNet(nn.Module):
         if self.clf:
             if self.adv_eta is not None:
                 x = grad_reverse(x, self.adv_eta)
-            x = self.clf2_layer(x)
+            x = self.clf_layer(x)
             return x_siam, x
         else:
             return x_siam
